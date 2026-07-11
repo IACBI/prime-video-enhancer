@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -14,9 +15,11 @@ if (edgePath is null)
     return 1;
 }
 
-Console.WriteLine("Starting Prime Video Speed Controller...");
+Console.WriteLine("Starting Prime Video Speed & Subtitle Controller...");
 Console.WriteLine("Prime Video will open in a dedicated Microsoft Edge app window.");
-Console.WriteLine("The speed control appears only when the video player is available.");
+Console.WriteLine("The speed & subtitle control appears automatically when the video player is available.");
+Console.WriteLine("Zero-Visibility Ad Shield is active across network and player levels.");
+Console.WriteLine("Custom Prime Video icon applied to application window and taskbar via AppUserModelID.");
 Console.WriteLine("Close this console window to stop the helper.");
 
 StartEdge(edgePath);
@@ -34,8 +37,13 @@ while (true)
             if (IsPrimeVideoTarget(target) && target.WebSocketDebuggerUrl is not null)
             {
                 await InjectSpeedControl(target.WebSocketDebuggerUrl, script);
+                AppIconHelper.ApplyToEdgeWindows();
             }
         }
+    }
+    catch (OperationCanceledException)
+    {
+        // Polling request or WebSocket operation timed out; retry on next tick.
     }
     catch (HttpRequestException)
     {
@@ -76,6 +84,28 @@ static string LoadInjectionScript()
     return File.ReadAllText(scriptPath, Encoding.UTF8);
 }
 
+static void CreateShortcut(string shortcutPath, string targetPath, string arguments, string iconPath)
+{
+    try
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"$s = (New-Object -COM WScript.Shell).CreateShortcut($env:LNK_PATH); $s.TargetPath = $env:TARGET_PATH; $s.Arguments = $env:ARGS_STR; $s.IconLocation = $env:ICON_PATH; $s.Save()\"",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.Environment["LNK_PATH"] = shortcutPath;
+        psi.Environment["TARGET_PATH"] = targetPath;
+        psi.Environment["ARGS_STR"] = arguments;
+        psi.Environment["ICON_PATH"] = iconPath;
+
+        var proc = Process.Start(psi);
+        proc?.WaitForExit(2000);
+    }
+    catch { }
+}
+
 static void StartEdge(string edgePath)
 {
     var profileDir = Path.Combine(
@@ -85,26 +115,47 @@ static void StartEdge(string edgePath)
 
     Directory.CreateDirectory(profileDir);
 
+    AppIconHelper.EnsureAppIconLoaded();
+    var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+
     var arguments = string.Join(
         " ",
         $"--remote-debugging-port={RemoteDebuggingPort}",
+        "--remote-debugging-address=127.0.0.1",
         $"--user-data-dir=\"{profileDir}\"",
         "--no-first-run",
         "--new-window",
         $"--app=\"{PrimeVideoUrl}\"");
 
-    Process.Start(new ProcessStartInfo
+    var shortcutPath = Path.Combine(profileDir, "PrimeVideoSpeedController.lnk");
+    CreateShortcut(shortcutPath, edgePath, arguments, iconPath);
+
+    try
     {
-        FileName = edgePath,
-        Arguments = arguments,
-        UseShellExecute = false
-    });
+        AppIconHelper.EdgeProcess = Process.Start(new ProcessStartInfo
+        {
+            FileName = shortcutPath,
+            UseShellExecute = true
+        });
+    }
+    catch
+    {
+        AppIconHelper.EdgeProcess = Process.Start(new ProcessStartInfo
+        {
+            FileName = edgePath,
+            Arguments = arguments,
+            UseShellExecute = false
+        });
+    }
 }
 
 static async Task<List<DebugTarget>> GetTargets(HttpClient httpClient)
 {
-    using var stream = await httpClient.GetStreamAsync($"http://127.0.0.1:{RemoteDebuggingPort}/json");
-    var targets = await JsonSerializer.DeserializeAsync<List<DebugTarget>>(stream, JsonOptions());
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    using var response = await httpClient.GetAsync($"http://127.0.0.1:{RemoteDebuggingPort}/json", cts.Token);
+    response.EnsureSuccessStatusCode();
+    using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+    var targets = await JsonSerializer.DeserializeAsync<List<DebugTarget>>(stream, JsonOptions(), cts.Token);
     return targets ?? [];
 }
 
@@ -127,12 +178,70 @@ static bool IsPrimeVideoTarget(DebugTarget target)
 
 static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
 {
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
     using var socket = new ClientWebSocket();
-    await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), CancellationToken.None);
+    await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), cts.Token);
 
-    var payload = JsonSerializer.Serialize(new
+    var enableNetworkPayload = JsonSerializer.Serialize(new
+    {
+        id = 10,
+        method = "Network.enable",
+        @params = new { }
+    });
+    var enableNetworkBytes = Encoding.UTF8.GetBytes(enableNetworkPayload);
+    await socket.SendAsync(enableNetworkBytes, WebSocketMessageType.Text, true, cts.Token);
+
+    var blockedUrlsPayload = JsonSerializer.Serialize(new
+    {
+        id = 11,
+        method = "Network.setBlockedURLs",
+        @params = new
+        {
+            urls = new[]
+            {
+                "*amazon-adsystem.com*",
+                "*a2z.com/telemetry*",
+                "*flashtalking.com*",
+                "*scorecardresearch.com*",
+                "*doubleclick.net*",
+                "*fwmrm.net*",
+                "*innovid.com*"
+            }
+        }
+    });
+    var blockedUrlsBytes = Encoding.UTF8.GetBytes(blockedUrlsPayload);
+    await socket.SendAsync(blockedUrlsBytes, WebSocketMessageType.Text, true, cts.Token);
+
+    const string fastCheckExpression = "(window.__primeVideoSpeedControl?.installed ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
+    var checkPayload = JsonSerializer.Serialize(new
     {
         id = 1,
+        method = "Runtime.evaluate",
+        @params = new
+        {
+            expression = fastCheckExpression,
+            awaitPromise = false,
+            returnByValue = true
+        }
+    });
+
+    var checkBytes = Encoding.UTF8.GetBytes(checkPayload);
+    await socket.SendAsync(checkBytes, WebSocketMessageType.Text, true, cts.Token);
+
+    var buffer = new byte[4096];
+    var result = await socket.ReceiveAsync(buffer, cts.Token);
+    if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
+    {
+        var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
+        if (responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+    }
+
+    var fullPayload = JsonSerializer.Serialize(new
+    {
+        id = 2,
         method = "Runtime.evaluate",
         @params = new
         {
@@ -142,11 +251,9 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
         }
     });
 
-    var bytes = Encoding.UTF8.GetBytes(payload);
-    await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
-
-    var buffer = new byte[4096];
-    await socket.ReceiveAsync(buffer, CancellationToken.None);
+    var fullBytes = Encoding.UTF8.GetBytes(fullPayload);
+    await socket.SendAsync(fullBytes, WebSocketMessageType.Text, true, cts.Token);
+    await socket.ReceiveAsync(buffer, cts.Token);
 }
 
 static JsonSerializerOptions JsonOptions()
@@ -155,6 +262,199 @@ static JsonSerializerOptions JsonOptions()
     {
         PropertyNameCaseInsensitive = true
     };
+}
+
+internal static class AppIconHelper
+{
+    const uint IMAGE_ICON = 1;
+    const uint LR_LOADFROMFILE = 0x00000010;
+    const uint LR_DEFAULTSIZE = 0x00000040;
+    const uint WM_SETICON = 0x0080;
+    const nint ICON_SMALL = 0;
+    const nint ICON_BIG = 1;
+    const ushort VT_LPWSTR = 31;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern nint LoadImage(nint hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern nint SendMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    static extern bool EnumWindows(EnumWindowsProc enumProc, nint lParam);
+
+    delegate bool EnumWindowsProc(nint hWnd, nint lParam);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(nint hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern int GetClassName(nint hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    static extern uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
+
+    [DllImport("shell32.dll", SetLastError = true)]
+    static extern int SHGetPropertyStoreForWindow(nint hwnd, ref Guid iid, out IPropertyStore? propertyStore);
+
+    [DllImport("ole32.dll")]
+    static extern int PropVariantClear(ref PROPVARIANT pvar);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROPERTYKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+        public PROPERTYKEY(Guid guid, uint pid)
+        {
+            fmtid = guid;
+            this.pid = pid;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROPVARIANT
+    {
+        public ushort vt;
+        public ushort wReserved1;
+        public ushort wReserved2;
+        public ushort wReserved3;
+        public nint pwszVal;
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore
+    {
+        int GetCount(out uint cProps);
+        int GetAt(uint iProp, out PROPERTYKEY pkey);
+        int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        int SetValue(ref PROPERTYKEY key, ref PROPVARIANT propvar);
+        int Commit();
+    }
+
+    private static nint appIconHandle = nint.Zero;
+    public static Process? EdgeProcess { get; set; }
+
+    public static void EnsureAppIconLoaded()
+    {
+        if (appIconHandle != nint.Zero) return;
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (!File.Exists(iconPath))
+        {
+            try
+            {
+                var psScript = Path.Combine(AppContext.BaseDirectory, "Assets", "generate-app-icon.ps1");
+                if (File.Exists(psScript))
+                {
+                    var proc = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "powershell.exe",
+                        Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{psScript}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    });
+                    proc?.WaitForExit(3000);
+                }
+            }
+            catch { }
+        }
+
+        if (File.Exists(iconPath))
+        {
+            appIconHandle = LoadImage(nint.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+        }
+    }
+
+    private static bool IsOurDedicatedEdgeProcess(uint windowPid, string titleStr)
+    {
+        if (EdgeProcess != null && !EdgeProcess.HasExited && windowPid == EdgeProcess.Id)
+            return true;
+
+        try
+        {
+            using var proc = Process.GetProcessById((int)windowPid);
+            // 1. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
+            if (!proc.ProcessName.Equals("msedge", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            // 2. Exclude windows whose title looks like an IDE / editor / tab search
+            if (titleStr.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
+                titleStr.Contains("Visual Studio", StringComparison.OrdinalIgnoreCase) ||
+                titleStr.Contains("Cursor", StringComparison.OrdinalIgnoreCase) ||
+                titleStr.Contains(".cs", StringComparison.OrdinalIgnoreCase) ||
+                titleStr.Contains(".md", StringComparison.OrdinalIgnoreCase) ||
+                titleStr.Contains(".js", StringComparison.OrdinalIgnoreCase) ||
+                titleStr.Contains("Altyazı Öz", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // 3. Must match Prime Video or Amazon in the title
+            if (titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) || titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    public static void ApplyToEdgeWindows()
+    {
+        EnsureAppIconLoaded();
+        if (appIconHandle == nint.Zero) return;
+
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        var exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+        var storeGuid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        var pkeyAumid = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
+        var pkeyIcon = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 3);
+        var pkeyCmd = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 2);
+
+        EnumWindows((hWnd, lParam) =>
+        {
+            var className = new StringBuilder(256);
+            if (GetClassName(hWnd, className, 256) > 0 && className.ToString().Contains("Chrome_WidgetWin_1", StringComparison.OrdinalIgnoreCase))
+            {
+                GetWindowThreadProcessId(hWnd, out uint windowPid);
+                var title = new StringBuilder(512);
+                GetWindowText(hWnd, title, 512);
+                var titleStr = title.ToString();
+
+                if (IsOurDedicatedEdgeProcess(windowPid, titleStr))
+                {
+                    SendMessage(hWnd, WM_SETICON, ICON_SMALL, appIconHandle);
+                    SendMessage(hWnd, WM_SETICON, ICON_BIG, appIconHandle);
+
+                    try
+                    {
+                        if (SHGetPropertyStoreForWindow(hWnd, ref storeGuid, out var propStore) == 0 && propStore != null)
+                        {
+                            var pvAumid = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni("PrimeVideoSpeedController.App") };
+                            propStore.SetValue(ref pkeyAumid, ref pvAumid);
+                            PropVariantClear(ref pvAumid);
+
+                            var pvIcon = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(iconPath) };
+                            propStore.SetValue(ref pkeyIcon, ref pvIcon);
+                            PropVariantClear(ref pvIcon);
+
+                            if (!string.IsNullOrEmpty(exePath))
+                            {
+                                var pvCmd = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(exePath) };
+                                propStore.SetValue(ref pkeyCmd, ref pvCmd);
+                                PropVariantClear(ref pvCmd);
+                            }
+
+                            propStore.Commit();
+                        }
+                    }
+                    catch { }
+                }
+            }
+            return true;
+        }, nint.Zero);
+    }
 }
 
 internal sealed class DebugTarget

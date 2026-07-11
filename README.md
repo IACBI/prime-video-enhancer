@@ -1,8 +1,8 @@
-# Prime Video Speed Controller
+# Prime Video Speed & Subtitle Controller
 
-**Prime Video Speed Controller** is a lightweight Windows helper that opens Prime Video in a dedicated Microsoft Edge app window and adds a clean playback speed control to the video player.
+**Prime Video Speed & Subtitle Controller** is an open-source, lightweight Windows helper that opens Prime Video in a dedicated Microsoft Edge app window, adding a clean playback speed control (`1.2x ●` / `1.2x ⚡`), an automatic subtitle color stabilizer, and an always-on **4-Layer Zero-Visibility Ad Shield** (`🛡️ Reklam Kalkanı`).
 
-It is built for viewers who want a simple speed selector without modifying the official Prime Video app, bypassing DRM, downloading video, or installing a browser extension.
+It is built for viewers who want a seamless, commercial-free streaming experience with simple speed selection and consistent yellow subtitles without modifying the official Prime Video app, bypassing DRM, downloading video, or installing a browser extension.
 
 **Author:** **𝓐.𝓒.𝓑**  
 **License:** MIT  
@@ -19,19 +19,30 @@ It is built for viewers who want a simple speed selector without modifying the o
 
 ### Overview
 
-Prime Video Speed Controller launches Prime Video in an Edge app-style window and adds a small speed button when a real video player is detected. The control stays out of the way, can be dragged to a preferred position, and remembers the selected playback speed locally.
+Prime Video Speed & Subtitle Controller launches Prime Video in an Edge app-style window and adds a sleek floating button when a real video player is detected. The control stays out of the way, can be dragged to a preferred position, and remembers both your selected playback speed and custom subtitle color preferences locally.
 
-This project is intentionally narrow in scope: it improves playback comfort while leaving Prime Video, DRM, account data, and streaming restrictions untouched.
+In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 4-Layer Zero-Visibility Ad Shield** that blocks ad trackers at the network level (`Network.setBlockedURLs`) and blackouts unskippable stitched ad segments with `16x` hyper-speed and automatic muting, ensuring you never see or hear commercials (`Zero-Visibility`).
 
 ### Features
 
-- Opens Prime Video in a dedicated Microsoft Edge app window.
-- Shows the speed control only when video playback is available.
-- Includes common presets: `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Supports fine adjustment with `+` and `-` in `0.1x` steps.
-- Lets you drag the speed button to a comfortable place on screen.
-- Remembers the selected speed and button position locally.
-- Reapplies the selected speed if Prime Video resets the video element.
+- Opens Prime Video in a dedicated Microsoft Edge app window (`--remote-debugging-address=127.0.0.1`).
+- Shows the speed & subtitle control (`1.2x ●` / `1.2x ⚡`) only when video playback is available.
+- **Always-On 4-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
+  - **Layer 1 (Network Ad & Tracker Blocker):** Blocks Amazon ad servers (`amazon-adsystem.com`), telemetry, and tracking networks right at the Chromium network layer (`Network.setBlockedURLs`).
+  - **Layer 2 (CSS Banner & Countdown Destroyer):** Permanently removes "Ad 1 of 2", ad countdown banners, and ad overlays (`display: none !important`).
+  - **Layer 3 (Blackout Curtain & Auto-Mute):** During unskippable SSAI ad breaks, instantly mutes the commercial audio (`video.muted = true`) and hides video frames behind a dark `⚡ Reklam Atlanıyor...` blackout curtain (`opacity: 0`). You never see or hear commercial content.
+  - **Layer 4 (Auto-Skip Clicker & 16x Hyper-Speed):** Automatically clicks "Skip Ad" the millisecond it appears, or accelerates unskippable ads at `16x` speed to finish them in seconds before restoring normal playback (`1.2x`).
+- **Smart Auto-Hide During Playback:** Exactly 2 seconds after video playback begins (`play`/`playing`) or the mouse stops moving, the floating button smoothly fades out (`opacity: 0`) for an ultra-clean viewing experience matching native Prime Video controls. Reappears instantly on mouse movement or pause.
+- **Compact Icon Indicator:** Displays your current speed and a clean indicator icon:
+  - **`1.2x ●`** when custom subtitle styling is ON (the dot glows in your selected subtitle color).
+  - **`1.2x ⚡`** when subtitle override is OFF (speed control only).
+- **Multi-layer Subtitle Stabilizer:** Prevents Prime Video from resetting subtitle styles across episodes using `MutationObserver` and dynamic CSS (`!important`).
+- **Two-Section Glassmorphism Menu:** Cleanly separates `⚡ Hız Kontrolü` (Speed Control) and `💬 Altyazı Rengi` (Subtitle Color).
+- Includes common speed presets: `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x` and fine adjustments (`+` / `-`).
+- Includes 5 preset subtitle colors: **Yellow (`#FFCC00`)**, **Gold (`#FFD700`)**, **White (`#FFFFFF`)**, **Green (`#00FF66`)**, and **Cyan (`#00FFFF`)**.
+- Lets you drag the floating button to a comfortable place on screen.
+- Remembers selected speed, button position, subtitle color, and toggle state locally.
+- Reapplies settings automatically if Prime Video resets the video element or subtitle tracks.
 
 ### What It Does Not Do
 
@@ -52,49 +63,37 @@ This project is intentionally narrow in scope: it improves playback comfort whil
 2. Run `run.cmd`.
 3. Sign in to Prime Video in the window that opens.
 4. Start a movie or episode.
-5. Click the speed button and choose your preferred speed.
+5. Click the floating button (`1.2x ●`) to adjust playback speed or pick your subtitle color. Enjoy zero ads automatically!
 
-If a published executable exists, `run.cmd` starts it. Otherwise, it runs the project with `dotnet run`.
+### Controls & Shortcuts
 
-### Controls
-
-- Click the speed button to open or close the speed menu.
-- Drag the speed button while holding the mouse button to move it.
-- Click a preset to apply it immediately.
-- Use `+` or `-` for `0.1x` speed changes.
+- Click the floating button to open or close the menu.
+- Drag the floating button while holding the mouse button to move it.
+- Click any speed preset or use `+` / `-` for `0.1x` speed changes.
+- Click the subtitle toggle switch or any color swatch (`Sarı`, `Altın`, `Beyaz`, `Yeşil`, `Mavi`).
+- Press `Alt + C` or `Shift + C` to instantly toggle subtitle styling ON/OFF.
 - Press `]` to increase speed by `0.1x`.
 - Press `[` to decrease speed by `0.1x`.
 - Press `\` to reset speed to `1x`.
+- Press `Escape` to close the menu.
 
 ### Build From Source
 
 ```powershell
-dotnet build
-dotnet run
-```
-
-To create a local publish output:
-
-```powershell
-dotnet publish -c Release -o publish
+dotnet build -c Release
+dotnet run -c Release
 ```
 
 ### Privacy And Security
 
-The app starts Edge with a dedicated local profile and a local debugging endpoint on `127.0.0.1`. It uses that local endpoint only to inject the speed-control script into Prime Video pages opened by the Edge instance it launched.
+The app starts Edge with a dedicated local profile and restricts remote debugging strictly to `127.0.0.1:9223`. It uses that local endpoint only to inject the `speed-control.js` script and apply `Network.setBlockedURLs` into Prime Video pages opened by the Edge instance it launched.
 
-The injected script stores only two local preferences in the browser profile:
-
+The injected script stores only local preferences in `localStorage`:
 - selected playback speed
-- speed button position
+- floating button coordinates
+- selected subtitle color and status
 
-No account credentials, cookies, tokens, viewing history, or personal data are collected by this project.
-
-### Limitations
-
-Prime Video can change its player implementation at any time. If the player DOM changes significantly, the speed button may require a small update.
-
-Taskbar icon behavior is partly controlled by Windows and Edge when using Edge app mode. The project prioritizes playback reliability over replacing Edge with a custom browser shell.
+No credentials, cookies, tokens, viewing history, or personal data are collected or transmitted.
 
 ### License
 
@@ -107,31 +106,46 @@ Released under the MIT License. See [LICENSE](LICENSE).
 
 ### Genel Bakış
 
-**Prime Video Speed Controller**, Prime Video'yu Microsoft Edge'in uygulama tarzı penceresinde açan ve gerçek bir video oynatıcı algılandığında sade bir hız butonu ekleyen küçük bir Windows yardımcı aracıdır. Buton sürüklenebilir, seçtiğiniz konumu hatırlar ve hız tercihinizi yerel olarak saklar.
+**Prime Video Speed & Subtitle Controller**, Prime Video'yu Microsoft Edge'in uygulama tarzı penceresinde açan, gerçek bir video oynatıcı algılandığında şık bir kayan buton (`1.2x ●` / `1.2x ⚡`) ekleyen, altyazı renklerinin her bölümde sıfırlanma sorununu çözen ve **4 Katmanlı Görünmez Reklam Kalkanı (`Zero-Visibility Ad Shield`)** ile reklamları tamamen yok eden açık kaynaklı bir Windows yardımcı aracıdır.
 
-Projenin amacı yalnızca izleme konforunu artırmaktır. Resmi Prime Video uygulamasını değiştirmez, DRM'i aşmaz, video indirmez ve hesap verilerinize erişmez.
+Amazon Prime Video web oynatıcısında hem altyazı sıfırlanma sorununu çözer (varsayılan **Sarı `#FFCC00`**), hem de reklam aralarında hiçbir reklam videosu veya sesi hissettirmeden (`Siyah Perde + Sessize Alma + 16x Hiper Hız`) kesintisiz bir izleme keyfi sunar.
 
 ### Özellikler
 
-- Prime Video'yu ayrı bir Microsoft Edge uygulama penceresinde açar.
-- Hız kontrolünü yalnızca video oynatıcı bulunduğunda gösterir.
-- `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x` hazır hızlarını destekler.
-- `+` ve `-` ile `0.1x` adımlarla ince ayar yapılabilir.
-- Hız butonu fareyle sürüklenerek istenen yere taşınabilir.
-- Seçilen hız ve buton konumu yerel olarak hatırlanır.
-- Prime Video hızı sıfırlarsa seçilen hızı tekrar uygular.
+- Prime Video'yu yerel ağa kapalı (`127.0.0.1`) özel bir Microsoft Edge uygulama penceresinde açar.
+- Hız ve altyazı kontrolünü yalnızca video oynatıcı bulunduğunda gösterir.
+- **Her Zaman Aktif 4 Katmanlı Görünmez Reklam Kalkanı (`🛡️ Reklam Kalkanı`):**
+  - **Katman 1 (C# Ağ / CDP Engellemesi):** Amazon reklam sunucuları (`amazon-adsystem.com`), telemetri ve takip ağları doğrudan tarayıcı ağ katmanında (`Network.setBlockedURLs`) engellenir.
+  - **Katman 2 (CSS Banner Yok Edici):** "Reklam 1/2" afişleri, geri sayım sayaçları ve reklam çubukları kalıcı olarak gizlenir (`display: none !important`).
+  - **Katman 3 (Görsel Siyah Perde & Sessize Alma - Blackout Curtain):** Oynatıcıda zorunlu (SSAI) reklam akışı algılandığı an video **sessize alınır (`video.muted = true`)** ve video ekranı **siyah perdeyle kaplanır (`opacity: 0`)**. Ekranda sadece **"⚡ Reklam Atlanıyor..."** yazısı görünür; kullanıcı reklamı asla izlemez ve duymaz.
+  - **Katman 4 (Anlık Skip & 16x Hiper Hız):** "Reklamı Atla / Skip Ad" butonu çıktığı milisaniye otomatik tıklanır. Atlanamayan reklamlarda video `16x` hıza alınarak reklam birkaç saniyede aşılır ve asıl içerik normal hızda (`1.2x`) pürüzsüzce geri gelir.
+- **Akıllı Otomatik Gizlenme (Temiz Ekran Deneyimi):** Video oynatılmaya başlandığı (`play` / `playing`) veya fare hareketsiz kaldığı andan itibaren tam **2 saniye içinde** kayan buton yumuşakça şeffaflaşıp (`opacity: 0`) ekrandan tamamen kaybolur. Fare oynatıldığında veya video duraklatıldığında anında görünür olur.
+- **Kompakt Simge ve Renk Göstergesi:** Uzun yazılar yerine sadece net hız (`1.2x`) ve şık bir simge gösterir:
+  - **`1.2x ●`** Altyazı rengi müdahalesi AÇIK olduğunda (nokta `●` seçtiğiniz altyazı renginde parlar!).
+  - **`1.2x ⚡`** Altyazı müdahalesi KAPALI olduğunda (sadece hız kontrolü aktif).
+- **Otomatik Sarı Altyazı Sabitleme:** Bölüm geçişlerinde altyazı renginin sıfırlanmasını engeller, her replikte seçilen rengi zorlar.
+- **İki Bölümlü Cam Efektli (Glassmorphism) Menü:** `⚡ Hız Kontrolü` (+/-, presetler) ve `💬 Altyazı Rengi` (Aç/Kapat anahtarı ve renk paleti) bölümlerini şıkça sunar.
+- `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x` hazır hızlarını ve `0.1x` hassas adımları destekler.
+- 5 hazır altyazı rengi sunar: **Sarı (`#FFCC00`)**, **Altın (`#FFD700`)**, **Beyaz (`#FFFFFF`)**, **Yeşil (`#00FF66`)**, **Açık Mavi (`#00FFFF`)**.
+- Kayan buton fareyle sürüklenerek istenen konuma taşınabilir.
+- Seçilen hız, buton konumu, altyazı rengi ve durumu yerel tarayıcı profilinde saklanır.
 
-### Kullanım
+### Kullanım ve Kısayollar
 
 1. Bu depoyu indirin veya klonlayın.
 2. `run.cmd` dosyasını çalıştırın.
 3. Açılan Prime Video penceresinde oturum açın.
 4. Bir film veya bölüm başlatın.
-5. Hız butonuna tıklayıp istediğiniz hızı seçin.
+5. `1.2x ●` butonuna tıklayıp istediğiniz hızı ve altyazı rengini seçin. Reklamlar otomatik engellenecektir!
 
-### Gizlilik
+- **`Alt + C` veya `Shift + C`:** Altyazı rengi müdahalesini anında açar / kapatır.
+- **`]` / `[`:** Oynatma hızını `0.1x` artırır / azaltır.
+- **`\`:** Hızı `1x` değerine sıfırlar.
+- **`Escape`:** Açılır menüyü kapatır.
 
-Proje şifre, çerez, token, izleme geçmişi veya özel hesap verisi toplamaz. Yalnızca seçilen hız ve buton konumu yerel tarayıcı profilinde saklanır.
+### Gizlilik ve Güvenlik
+
+Proje şifre, çerez, token, izleme geçmişi veya özel hesap verisi toplamaz ve iletmez. Uzaktan hata ayıklama portu yalnızca `127.0.0.1` adresine kilitlidir. Yalnızca seçilen hız, altyazı tercihi ve buton konumu yerel tarayıcı profilinde (`localStorage`) saklanır.
 
 ---
 
@@ -140,30 +154,15 @@ Proje şifre, çerez, token, izleme geçmişi veya özel hesap verisi toplamaz. 
 
 ### Resumen
 
-**Prime Video Speed Controller** es una herramienta ligera para Windows que abre Prime Video en una ventana de aplicación de Microsoft Edge y agrega un botón de velocidad cuando detecta un reproductor de video real. El botón se puede mover, recuerda su posición y guarda la velocidad elegida de forma local.
-
-El proyecto está pensado para mejorar la comodidad de reproducción sin modificar la aplicación oficial, evitar DRM ni descargar contenido.
+**Prime Video Speed & Subtitle Controller** es una herramienta ligera para Windows que abre Prime Video en Microsoft Edge, estabiliza el color de los subtítulos en **Amarillo (`#FFCC00`)** y elimina la publicidad con un **Escudo de Anuncios de 4 Capas (Zero-Visibility Ad Shield)** que bloquea servidores de anuncios (`Network.setBlockedURLs`), silencia los comerciales y los avanza a velocidad `16x` con cortina negra (`Blackout Curtain`).
 
 ### Funciones
 
-- Abre Prime Video en una ventana dedicada de Microsoft Edge.
-- Muestra el control de velocidad solo cuando hay un video disponible.
-- Incluye velocidades: `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Permite ajustes finos de `0.1x` con `+` y `-`.
-- Permite arrastrar el botón a una posición cómoda.
-- Guarda localmente la velocidad y la posición del botón.
-
-### Uso
-
-1. Descarga o clona el repositorio.
-2. Ejecuta `run.cmd`.
-3. Inicia sesión en Prime Video.
-4. Reproduce una película o episodio.
-5. Haz clic en el botón de velocidad y elige una opción.
-
-### Privacidad
-
-No recopila contraseñas, cookies, tokens, historial de reproducción ni datos privados de la cuenta. Solo guarda preferencias locales de velocidad y posición.
+- Abre Prime Video en una ventana dedicada de Microsoft Edge (`127.0.0.1`).
+- **Escudo de Anuncios de 4 Capas:** Bloqueo en red + Ocultación de banners + Cortina negra y silencio automático (`video.muted = true`) + Salto automático y avance hiperrápido a `16x`.
+- **Ocultamiento Automático (Auto-Hide):** El botón flotante desaparece tras 2 segundos de inactividad durante el video.
+- **Estabilizador de subtítulos:** Evita que Prime Video restablezca el color de los subtítulos usando `MutationObserver`.
+- Menú de dos secciones: `⚡ Velocidad` y `💬 Subtítulos` (Amarillo, Oro, Blanco, Verde, Cian).
 
 ---
 
@@ -172,30 +171,15 @@ No recopila contraseñas, cookies, tokens, historial de reproducción ni datos p
 
 ### Überblick
 
-**Prime Video Speed Controller** ist ein leichtes Windows-Hilfsprogramm, das Prime Video in einem Microsoft-Edge-Appfenster öffnet und bei erkanntem Videoplayer einen kompakten Geschwindigkeitsbutton einblendet. Der Button kann verschoben werden und merkt sich Geschwindigkeit und Position lokal.
-
-Das Projekt verbessert nur den Bedienkomfort. Es verändert die offizielle Prime-Video-App nicht, umgeht kein DRM und lädt keine Videos herunter.
+**Prime Video Speed & Subtitle Controller** ist ein leichtes Windows-Hilfsprogramm, das Prime Video in einem Microsoft-Edge-Appfenster öffnet, einen Geschwindigkeitsbutton (`1.2x ●` / `1.2x ⚡`) einblendet, Untertitelfarben fixiert (Standard: **Gelb `#FFCC00`**) und Werbung durch einen **4-stufigen Werbeschutz (Zero-Visibility Ad Shield)** völlig unsichtbar und lautlos macht (`Network.setBlockedURLs` + Blackout Curtain + 16x Fast-Forward).
 
 ### Funktionen
 
-- Öffnet Prime Video in einem dedizierten Microsoft-Edge-Appfenster.
-- Zeigt die Steuerung nur an, wenn ein Videoplayer vorhanden ist.
-- Unterstützt `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Feinanpassung in `0.1x`-Schritten mit `+` und `-`.
-- Der Button kann an eine bevorzugte Position gezogen werden.
-- Geschwindigkeit und Position werden lokal gespeichert.
-
-### Verwendung
-
-1. Repository herunterladen oder klonen.
-2. `run.cmd` starten.
-3. Bei Prime Video anmelden.
-4. Einen Film oder eine Episode starten.
-5. Den Geschwindigkeitsbutton anklicken und eine Option wählen.
-
-### Datenschutz
-
-Das Projekt sammelt keine Passwörter, Cookies, Tokens, Wiedergabeverläufe oder privaten Kontodaten. Es speichert nur lokale Einstellungen für Geschwindigkeit und Buttonposition.
+- Öffnet Prime Video in einem dedizierten Edge-Fenster.
+- **4-stufiger Werbeschutz:** Netzwerksperre für Ad-Server + Blackout Vorhang (`opacity: 0`) mit Stummschaltung beim Abspielen von Werbung + Automatisches Klicken auf "Werbung überspringen" und `16x` Schnelldurchlauf.
+- **Auto-Hide Funktion:** Der Button verschwindet nach 2 Sekunden Inaktivität beim Videoabspielen.
+- **Untertitel-Stabilisator:** Verhindert das Zurücksetzen der Untertitelfarbe bei Episodenwechseln.
+- Zweigeteiltes Menü: `⚡ Geschwindigkeit` und `💬 Untertitel`.
 
 ---
 
@@ -204,30 +188,15 @@ Das Projekt sammelt keine Passwörter, Cookies, Tokens, Wiedergabeverläufe oder
 
 ### Présentation
 
-**Prime Video Speed Controller** est un utilitaire Windows léger qui ouvre Prime Video dans une fenêtre d'application Microsoft Edge et ajoute un bouton de vitesse lorsqu'un vrai lecteur vidéo est détecté. Le bouton peut être déplacé et mémorise localement la vitesse et sa position.
-
-Le projet améliore uniquement le confort de lecture. Il ne modifie pas l'application officielle, ne contourne pas les DRM et ne télécharge aucun contenu.
+**Prime Video Speed & Subtitle Controller** est un utilitaire Windows léger et open-source qui ouvre Prime Video dans Microsoft Edge, ajoute un contrôle de vitesse, maintient la couleur de vos sous-titres en **Jaune (`#FFCC00`)** et intègre un **Bouclier Anti-Pub à 4 Niveaux (Zero-Visibility Ad Shield)** qui bloque les serveurs publicitaires en réseau (`Network.setBlockedURLs`) et masque/silence les pubs insérées à vitesse `16x`.
 
 ### Fonctions
 
 - Ouvre Prime Video dans une fenêtre dédiée Microsoft Edge.
-- Affiche le contrôle uniquement lorsqu'une vidéo est disponible.
-- Propose `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Permet un réglage fin par pas de `0.1x` avec `+` et `-`.
-- Permet de déplacer le bouton à l'endroit souhaité.
-- Enregistre localement la vitesse et la position du bouton.
-
-### Utilisation
-
-1. Téléchargez ou clonez ce dépôt.
-2. Lancez `run.cmd`.
-3. Connectez-vous à Prime Video.
-4. Lancez un film ou un épisode.
-5. Cliquez sur le bouton de vitesse et choisissez une valeur.
-
-### Confidentialité
-
-Le projet ne collecte pas les mots de passe, cookies, jetons, historiques de visionnage ou données privées du compte. Il conserve seulement les préférences locales de vitesse et de position.
+- **Bouclier Anti-Pub à 4 Niveaux:** Bloque les domaines publicitaires + Écran noir silencieux pendant les pubs obligatoires + Clic automatique sur "Passer l'annonce" et accélération `16x`.
+- **Masquage Automatique (Auto-Hide):** Le bouton disparaît après 2 secondes d'inactivity.
+- **Stabilisateur de sous-titres:** Empêche la réinitialisation de la couleur des sous-titres à chaque épisode.
+- Menu en deux sections: `⚡ Vitesse` et `💬 Sous-titres`.
 
 ---
 
@@ -236,30 +205,15 @@ Le projet ne collecte pas les mots de passe, cookies, jetons, historiques de vis
 
 ### Visão Geral
 
-**Prime Video Speed Controller** é uma ferramenta leve para Windows que abre o Prime Video em uma janela de aplicativo do Microsoft Edge e adiciona um botão de velocidade quando detecta um player de vídeo real. O botão pode ser movido e lembra a velocidade e a posição localmente.
-
-O projeto foi feito para melhorar o conforto de reprodução sem modificar o aplicativo oficial, contornar DRM ou baixar vídeos.
+**Prime Video Speed & Subtitle Controller** é uma ferramenta leve de código aberto para Windows que abre o Prime Video no Microsoft Edge, adiciona controle de velocidade (`1.2x ●` / `1.2x ⚡`), fixa a cor das legendas em **Amarelo (`#FFCC00`)** e bloqueia anúncios com um **Escudo de 4 Camadas (Zero-Visibility Ad Shield)** que silencia e avança anúncios obrigatórios a `16x`.
 
 ### Recursos
 
-- Abre o Prime Video em uma janela dedicada do Microsoft Edge.
-- Mostra o controle somente quando há vídeo disponível.
-- Inclui `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Permite ajuste fino em passos de `0.1x` com `+` e `-`.
-- Permite arrastar o botão para uma posição confortável.
-- Salva localmente a velocidade e a posição do botão.
-
-### Uso
-
-1. Baixe ou clone este repositório.
-2. Execute `run.cmd`.
-3. Entre na sua conta do Prime Video.
-4. Reproduza um filme ou episódio.
-5. Clique no botão de velocidade e escolha uma opção.
-
-### Privacidade
-
-O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dados privados da conta. Ele salva apenas preferências locais de velocidade e posição.
+- Abre o Prime Video em janela dedicada do Microsoft Edge.
+- **Escudo Anti-Anúncios de 4 Camadas:** Bloqueio de servidores de anúncios no nível de rede (`Network.setBlockedURLs`) + Cortina preta e silenciamento de áudio + Clique automático em "Pular Anúncio" e avanço de `16x`.
+- **Ocultação Automática (Auto-Hide):** O botão desaparece suavemente após 2 segundos de inatividade do mouse durante o vídeo.
+- **Estabilizador de Legendas:** Mantém a cor das legendas fixa através de `MutationObserver`.
+- Menu elegante com duas seções: `⚡ Velocidade` e `💬 Legendas`.
 
 ---
 
@@ -268,30 +222,15 @@ O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dad
 
 ### 概览
 
-**Prime Video Speed Controller** 是一个轻量级 Windows 辅助工具。它会在独立的 Microsoft Edge 应用窗口中打开 Prime Video，并在检测到真实视频播放器时添加一个简洁的播放速度按钮。按钮可以拖动，并会在本地记住所选速度和位置。
-
-本项目只用于提升观看体验。它不会修改官方 Prime Video 应用，不会绕过 DRM，也不会下载视频内容。
+**Prime Video Speed & Subtitle Controller** 是一个开源轻量级 Windows 辅助工具。它在 Microsoft Edge 独立窗口中打开 Prime Video，提供精简控制按钮（`1.2x ●` / `1.2x ⚡`），能稳定锁定字幕颜色为 **黄色 (`#FFCC00`)**，并内置 **4层零可见广告屏蔽盾 (Zero-Visibility Ad Shield)**，彻底拦截网络广告服务器并通过黑屏静音及 `16x` 倍速秒过不可跳过广告。
 
 ### 功能
 
-- 在独立的 Microsoft Edge 应用窗口中打开 Prime Video。
-- 仅在检测到视频播放器时显示速度控制。
-- 支持 `0.5x`、`1x`、`1.25x`、`1.5x`、`1.75x`、`2x`。
-- 可使用 `+` 和 `-` 以 `0.1x` 为步长微调速度。
-- 可将速度按钮拖动到合适的位置。
-- 在本地保存播放速度和按钮位置。
-
-### 使用方法
-
-1. 下载或克隆本仓库。
-2. 运行 `run.cmd`。
-3. 在打开的窗口中登录 Prime Video。
-4. 播放电影或剧集。
-5. 点击速度按钮并选择所需速度。
-
-### 隐私
-
-本项目不会收集密码、Cookie、令牌、观看记录或账号隐私数据。它只在本地保存速度和按钮位置偏好。
+- 在独立的 Microsoft Edge 窗口 (`127.0.0.1`) 中打开 Prime Video。
+- **4层零可见广告屏蔽盾:** 在 Chromium 网络层 (`Network.setBlockedURLs`) 屏蔽广告服务器 + 广告期间黑屏静音幕布 (`Blackout Curtain`) + 瞬间自动点击“跳过广告”并开启 `16x` 极速秒过。
+- **播放时自动隐藏:** 视频播放开始或鼠标停顿 2 秒后，悬浮按钮平滑隐藏，保持纯净画面。
+- **多层字幕锁定:** 利用 `MutationObserver` 强制锁定字幕颜色，跨集不断。
+- 精美菜单：`⚡ 播放速度` 与 `💬 字幕颜色`。
 
 ---
 
@@ -300,30 +239,15 @@ O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dad
 
 ### परिचय
 
-**Prime Video Speed Controller** Windows के लिए एक हल्का सहायक टूल है। यह Prime Video को Microsoft Edge की अलग ऐप विंडो में खोलता है और असली वीडियो प्लेयर मिलने पर एक साफ playback speed बटन जोड़ता है। बटन को खींचकर मनचाही जगह रखा जा सकता है और चुनी हुई speed स्थानीय रूप से याद रहती है।
-
-यह प्रोजेक्ट केवल देखने का अनुभव बेहतर करने के लिए है। यह आधिकारिक Prime Video ऐप को बदलता नहीं है, DRM को bypass नहीं करता और वीडियो डाउनलोड नहीं करता।
+**Prime Video Speed & Subtitle Controller** Windows के लिए एक ओपन-सोर्स और हल्का टूल है जो Prime Video को अलग Microsoft Edge विंडो में खोलता है, हर एपिसोड में subtitle color को **पीला (`#FFCC00`)** बनाए रखता है और **4-Layer Zero-Visibility Ad Shield** के साथ विज्ञापनों को पूरी तरह अदृश्य और शांत कर देता है (`Network.setBlockedURLs` + Blackout Curtain + 16x Fast-Forward)।
 
 ### सुविधाएँ
 
-- Prime Video को अलग Microsoft Edge app window में खोलता है।
-- Speed control केवल वीडियो उपलब्ध होने पर दिखता है।
-- `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x` presets उपलब्ध हैं।
-- `+` और `-` से `0.1x` steps में fine adjustment किया जा सकता है।
-- Speed button को drag करके जगह बदली जा सकती है।
-- Speed और button position स्थानीय रूप से सेव होती है।
-
-### उपयोग
-
-1. Repository डाउनलोड या clone करें।
-2. `run.cmd` चलाएँ।
-3. खुली हुई Prime Video window में sign in करें।
-4. कोई movie या episode चलाएँ।
-5. Speed button पर click करके अपनी speed चुनें।
-
-### गोपनीयता
-
-यह प्रोजेक्ट passwords, cookies, tokens, watch history या private account data collect नहीं करता। यह केवल स्थानीय speed और button position preferences सेव करता है।
+- Prime Video को समर्पित Microsoft Edge window में खोलता है।
+- **4-Layer Ad Shield:** नेटवर्क स्तर पर विज्ञापन सर्वर ब्लॉक करना + विज्ञापन के समय काली स्क्रीन और स्वतः म्यूट (`muted = true`) + स्वतः "Skip Ad" क्लिक और `16x` तेज़ गति।
+- **Auto-Hide:** वीडियो चलने के 2 सेकंड बाद बटन स्वतः छिप जाता है ताकि स्क्रीन बिल्कुल साफ रहे।
+- **Subtitle Stabilizer:** हर एपिसोड में subtitle color को reset होने से रोकता है।
+- दो भागों वाला मेनू: `⚡ Speed` और `💬 Subtitle`।
 
 ---
 
@@ -332,30 +256,15 @@ O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dad
 
 ### نظرة عامة
 
-**Prime Video Speed Controller** هو أداة خفيفة لنظام Windows تفتح Prime Video داخل نافذة تطبيق مخصصة من Microsoft Edge، وتضيف زر سرعة بسيطًا عند اكتشاف مشغل فيديو فعلي. يمكن سحب الزر إلى المكان المناسب، ويتم حفظ السرعة والموقع محليًا.
-
-الغرض من المشروع هو تحسين تجربة المشاهدة فقط. لا يغير تطبيق Prime Video الرسمي، ولا يتجاوز DRM، ولا يقوم بتنزيل الفيديوهات.
+**Prime Video Speed & Subtitle Controller** هو أداة مفتوحة المصدر وخفيفة لنظام Windows تفتح Prime Video داخل نافذة Microsoft Edge، وتحافظ على لون الترجمة **أصفر (`#FFCC00`)** دائمًا، وتضم **درع إعلانات مخفي من 4 طبقات (Zero-Visibility Ad Shield)** يمنع خوادم الإعلانات شبكيًا ويكتم صوت الإعلانات المدمجة ويسرعها إلى `16x` خلف ستارة سوداء.
 
 ### الميزات
 
-- يفتح Prime Video داخل نافذة Microsoft Edge مخصصة.
-- يعرض زر السرعة فقط عند توفر مشغل فيديو.
-- يدعم السرعات `0.5x` و `1x` و `1.25x` و `1.5x` و `1.75x` و `2x`.
-- يسمح بضبط دقيق بمقدار `0.1x` عبر `+` و `-`.
-- يمكن سحب زر السرعة إلى مكان مريح.
-- يحفظ السرعة المختارة وموقع الزر محليًا.
-
-### الاستخدام
-
-1. قم بتنزيل المستودع أو نسخه.
-2. شغّل `run.cmd`.
-3. سجّل الدخول إلى Prime Video في النافذة التي تفتح.
-4. شغّل فيلمًا أو حلقة.
-5. اضغط زر السرعة واختر القيمة المناسبة.
-
-### الخصوصية
-
-لا يجمع المشروع كلمات مرور أو ملفات تعريف ارتباط أو رموز وصول أو سجل مشاهدة أو بيانات حساب خاصة. يتم حفظ تفضيلات السرعة وموقع الزر محليًا فقط.
+- يفتح Prime Video في نافذة Edge مخصصة ومحمية محليًا.
+- **درع إعلانات من 4 طبقات:** حجب خوادم الإعلانات والتتبع (`Network.setBlockedURLs`) + شاشة سوداء وكتم الصوت التلقائي أثناء الإعلانات + نقر تلقائي لزر تخطي الإعلان وتسريع الفيديو إلى `16x`.
+- **الإخفاء التلقائي أثناء المشاهدة:** يختفي الزر العائم بعد ثانيتين من بدء الفيديو للحصول على شاشة نظيفة.
+- **مثبت الترجمة:** يمنع إعادة تعيين لون الترجمة بين الحلقات.
+- قائمة حديثة بقسمين: `⚡ السرعة` و `💬 الترجمة`.
 
 ---
 
@@ -364,30 +273,15 @@ O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dad
 
 ### Обзор
 
-**Prime Video Speed Controller** — легкая утилита для Windows, которая открывает Prime Video в отдельном окне приложения Microsoft Edge и добавляет аккуратную кнопку скорости при обнаружении реального видеоплеера. Кнопку можно перетащить в удобное место, а выбранная скорость и позиция сохраняются локально.
-
-Проект предназначен только для удобства просмотра. Он не изменяет официальное приложение Prime Video, не обходит DRM и не скачивает видео.
+**Prime Video Speed & Subtitle Controller** — открытая легкая утилита для Windows, которая открывает Prime Video в отдельном окне Microsoft Edge, фиксирует цвет субтитров на **Желтом (`#FFCC00`)** и полностью устраняет рекламу с помощью **4-уровневого щита нулевой видимости (Zero-Visibility Ad Shield)**, блокирующего рекламные домены на сетевом уровне (`Network.setBlockedURLs`), а также скрывающего рекламные вставки за черным экраном при скорости `16x`.
 
 ### Возможности
 
 - Открывает Prime Video в отдельном окне Microsoft Edge.
-- Показывает управление скоростью только при наличии видео.
-- Поддерживает `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Позволяет менять скорость шагом `0.1x` через `+` и `-`.
-- Позволяет перетаскивать кнопку скорости.
-- Локально сохраняет скорость и положение кнопки.
-
-### Использование
-
-1. Скачайте или клонируйте репозиторий.
-2. Запустите `run.cmd`.
-3. Войдите в Prime Video в открывшемся окне.
-4. Запустите фильм или эпизод.
-5. Нажмите кнопку скорости и выберите нужное значение.
-
-### Конфиденциальность
-
-Проект не собирает пароли, cookies, токены, историю просмотра или личные данные аккаунта. Он сохраняет только локальные настройки скорости и положения кнопки.
+- **4-уровневый рекламный щит:** Сетевая блокировка серверов рекламы + Черный экран (`Blackout Curtain`) и автоматическое отключение звука при показе рекламы + Мгновенный клик по кнопке "Пропустить рекламу" и ускорение до `16x`.
+- **Автоматическое скрытие (Auto-Hide):** Кнопка плавно исчезает через 2 секунды после начала видео.
+- **Стабилизатор субтитров:** Исключает сброс цвета субтитров между сериями.
+- Двухсекционное меню: `⚡ Скорость` и `💬 Субтитры`.
 
 ---
 
@@ -396,30 +290,15 @@ O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dad
 
 ### 概要
 
-**Prime Video Speed Controller** は、Windows 向けの軽量ヘルパーツールです。Prime Video を Microsoft Edge の専用アプリウィンドウで開き、実際の動画プレーヤーを検出したときだけシンプルな再生速度ボタンを追加します。ボタンはドラッグでき、選択した速度と位置はローカルに保存されます。
-
-このプロジェクトは視聴体験を改善するためのものです。公式 Prime Video アプリを変更せず、DRM を回避せず、動画をダウンロードしません。
+**Prime Video Speed & Subtitle Controller** は、Windows 向けのオープンソース軽量ツールです。Prime Video を Microsoft Edge の専用アプリウィンドウで開き、再生速度ボタン (`1.2x ●` / `1.2x ⚡`) を提供し、字幕の色を**黄色 (`#FFCC00`)**に固定するとともに、**4レイヤー広告遮断シールド (Zero-Visibility Ad Shield)** により、広告サーバーのネットワークブロックおよび広告再生時のブラックアウト・消音・`16倍速`自動スキップを実現します。
 
 ### 機能
 
-- Prime Video を専用の Microsoft Edge アプリウィンドウで開きます。
-- 動画プレーヤーがあるときだけ速度コントロールを表示します。
-- `0.5x`、`1x`、`1.25x`、`1.5x`、`1.75x`、`2x` に対応します。
-- `+` と `-` で `0.1x` 単位の微調整ができます。
-- 速度ボタンを好みの位置にドラッグできます。
-- 速度とボタン位置をローカルに保存します。
-
-### 使い方
-
-1. このリポジトリをダウンロードまたは clone します。
-2. `run.cmd` を実行します。
-3. 開いた Prime Video ウィンドウでサインインします。
-4. 映画またはエピソードを再生します。
-5. 速度ボタンをクリックして速度を選択します。
-
-### プライバシー
-
-このプロジェクトはパスワード、Cookie、トークン、視聴履歴、個人アカウント情報を収集しません。保存するのはローカルの速度設定とボタン位置だけです。
+- 専用の Microsoft Edge アプリウィンドウで開きます。
+- **4レイヤー広告遮断シールド:** Chromium ネットワーク層での広告サーバーブロック (`Network.setBlockedURLs`) + 広告再生中の画面暗転・ミュート機能 + スキップボタンの自動クリック及び不可避広告の `16倍速` 高速消化。
+- **自動非表示機能:** 再生開始から2秒後にボタンがスムーズに消え、クリーンな画面で視聴できます。
+- **字幕カラー固定機能:** `MutationObserver` により、次の話へ進んでも字幕色を黄色に保ちます。
+- 2セクション構成メニュー: `⚡ 再生速度` と `💬 字幕カラー`。
 
 ---
 
@@ -428,27 +307,12 @@ O projeto não coleta senhas, cookies, tokens, histórico de reprodução ou dad
 
 ### Ringkasan
 
-**Prime Video Speed Controller** adalah alat ringan untuk Windows yang membuka Prime Video di jendela aplikasi Microsoft Edge khusus dan menambahkan tombol kecepatan saat pemutar video terdeteksi. Tombol dapat dipindahkan, serta menyimpan kecepatan dan posisinya secara lokal.
-
-Proyek ini dibuat untuk meningkatkan kenyamanan menonton saja. Proyek ini tidak mengubah aplikasi resmi Prime Video, tidak melewati DRM, dan tidak mengunduh video.
+**Prime Video Speed & Subtitle Controller** adalah alat ringan open-source untuk Windows yang membuka Prime Video di Microsoft Edge khusus, mengunci warna subtitle tetap **Kuning (`#FFCC00`)**, dan dilengkapi **Perisai Iklan 4 Lapis Tanpa Tampilan (Zero-Visibility Ad Shield)** yang memblokir server iklan di tingkat jaringan (`Network.setBlockedURLs`) serta membisukan dan mempercepat iklan hingga `16x` di balik layar hitam.
 
 ### Fitur
 
-- Membuka Prime Video di jendela Microsoft Edge khusus.
-- Menampilkan kontrol kecepatan hanya saat video tersedia.
-- Mendukung `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`.
-- Mendukung penyesuaian `0.1x` dengan `+` dan `-`.
-- Tombol kecepatan dapat diseret ke posisi yang nyaman.
-- Kecepatan dan posisi tombol disimpan secara lokal.
-
-### Cara Pakai
-
-1. Unduh atau clone repositori ini.
-2. Jalankan `run.cmd`.
-3. Masuk ke Prime Video di jendela yang terbuka.
-4. Putar film atau episode.
-5. Klik tombol kecepatan dan pilih opsi yang diinginkan.
-
-### Privasi
-
-Proyek ini tidak mengumpulkan kata sandi, cookie, token, riwayat tontonan, atau data akun pribadi. Hanya preferensi kecepatan dan posisi tombol yang disimpan secara lokal.
+- Membuka Prime Video di jendela Microsoft Edge khusus (`127.0.0.1`).
+- **Perisai Iklan 4 Lapis:** Pemblokiran jaringan server iklan + Tirai hitam dan bisu otomatis (`video.muted = true`) saat iklan tayang + Klik otomatis tombol "Lewati Iklan" dan percepatan `16x`.
+- **Sembunyi Otomatis (Auto-Hide):** Tombol otomatis menghilang setelah 2 detik video berjalan agar layar bersih.
+- **Penstabil Subtitle:** Mencegah Prime Video mereset warna subtitle antar episode.
+- Menu dua bagian: `⚡ Kecepatan` dan `💬 Subtitle`.

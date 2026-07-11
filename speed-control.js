@@ -1,17 +1,34 @@
 (() => {
   const ROOT_ID = "pvsc-root";
   const STYLE_ID = "pvsc-style";
+  const SUBTITLE_STYLE_ID = "pvsc-subtitle-style";
+  const AD_SHIELD_STYLE_ID = "pvsc-ad-shield-style";
+  const AD_CURTAIN_ID = "pvsc-ad-curtain";
   const STORAGE_KEY = "primeVideoSpeedControl.speed";
   const POSITION_KEY = "primeVideoSpeedControl.position";
+  const SUBTITLE_STORAGE_KEY = "primeVideoSpeedControl.subtitleColor";
+  const SUBTITLE_ENABLED_KEY = "primeVideoSpeedControl.subtitleEnabled";
+  
   const MIN_SPEED = 0.25;
   const MAX_SPEED = 4;
   const STEP = 0.1;
   const DEFAULT_SPEED = 1;
   const PRESET_SPEEDS = [0.5, 1, 1.25, 1.5, 1.75, 2];
 
+  const DEFAULT_SUBTITLE_COLOR = "#FFCC00";
+  const PRESET_COLORS = [
+    { name: "Sarı", hex: "#FFCC00" },
+    { name: "Altın", hex: "#FFD700" },
+    { name: "Beyaz", hex: "#FFFFFF" },
+    { name: "Yeşil", hex: "#00FF66" },
+    { name: "Mavi", hex: "#00FFFF" },
+  ];
+
   if (window.__primeVideoSpeedControl?.installed) {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
+    window.__primeVideoSpeedControl.applySubtitleStyles();
+    window.__primeVideoSpeedControl.checkAndHandleAds();
     return "already-installed";
   }
 
@@ -19,6 +36,13 @@
   if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) {
     speed = DEFAULT_SPEED;
   }
+
+  let subtitleColor = window.localStorage.getItem(SUBTITLE_STORAGE_KEY) || DEFAULT_SUBTITLE_COLOR;
+  if (!/^#[0-9A-Fa-f]{6}$/.test(subtitleColor)) {
+    subtitleColor = DEFAULT_SUBTITLE_COLOR;
+  }
+
+  let subtitleEnabled = window.localStorage.getItem(SUBTITLE_ENABLED_KEY) !== "false";
 
   let hideTimer = 0;
   let isMenuOpen = false;
@@ -29,6 +53,13 @@
   let lastPointerX = 0;
   let lastPointerY = 0;
 
+  let currentObservedContainer = null;
+  let subtitleObserver = null;
+  let attachedVideo = null;
+
+  let isAdCurrentlyActive = false;
+  let wasMutedBeforeAd = false;
+
   function clamp(value) {
     return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
   }
@@ -37,16 +68,48 @@
     return `${value.toFixed(2).replace(/\.?0+$/, "")}x`;
   }
 
+  function updateButtonDisplay() {
+    if (!speedButton) return;
+    const formattedSpeed = format(speed);
+    if (subtitleEnabled) {
+      speedButton.innerHTML = `${formattedSpeed} <span style="color: ${subtitleColor}; margin-left: 6px; font-size: 13px; text-shadow: 0 0 5px rgba(0,0,0,0.85);">●</span>`;
+    } else {
+      speedButton.innerHTML = `${formattedSpeed} <span style="color: rgba(255,255,255,0.48); margin-left: 6px; font-size: 12px;">⚡</span>`;
+    }
+  }
+
   function findVideo() {
     const videos = Array.from(document.querySelectorAll("video"));
     return videos.find((video) => video.readyState > 0) || videos[0] || null;
   }
 
+  function attachVideoListeners(video) {
+    if (!video || video === attachedVideo) {
+      return;
+    }
+    if (attachedVideo) {
+      attachedVideo.removeEventListener("play", showControls);
+      attachedVideo.removeEventListener("playing", showControls);
+      attachedVideo.removeEventListener("pause", showControls);
+      attachedVideo.removeEventListener("seeked", showControls);
+    }
+    attachedVideo = video;
+    attachedVideo.addEventListener("play", showControls, { passive: true });
+    attachedVideo.addEventListener("playing", showControls, { passive: true });
+    attachedVideo.addEventListener("pause", showControls, { passive: true });
+    attachedVideo.addEventListener("seeked", showControls, { passive: true });
+    showControls();
+  }
+
   function applySpeed() {
+    if (isAdCurrentlyActive) {
+      return;
+    }
     const video = findVideo();
     if (!video) {
       return;
     }
+    attachVideoListeners(video);
 
     if (video.playbackRate !== speed) {
       video.playbackRate = speed;
@@ -57,12 +120,264 @@
     }
   }
 
+  function ensureAdShieldStyle() {
+    if (document.getElementById(AD_SHIELD_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = AD_SHIELD_STYLE_ID;
+    style.textContent = `
+      .atvwebplayersdk-ad-indicator,
+      .atvwebplayersdk-adbreak-indicator,
+      .ad-countdown,
+      [data-testid*="ad-" i],
+      [data-testid*="adIndicator" i],
+      [class*="adIndicator" i],
+      [class*="adBreak" i],
+      .ad-timer,
+      .ad-break-container {
+        display: none !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      #${AD_CURTAIN_ID} {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: #08090c !important;
+        z-index: 2147483640 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        color: #f7f7f8 !important;
+        font: 700 22px/1.4 Arial, sans-serif !important;
+        letter-spacing: 1px !important;
+        pointer-events: auto !important;
+      }
+    `;
+    document.documentElement.appendChild(style);
+  }
+
+  function checkAndHandleAds() {
+    ensureAdShieldStyle();
+    const video = findVideo();
+    if (!video) return;
+
+    const skipButtons = document.querySelectorAll(
+      ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], button[title*='skip' i]"
+    );
+    for (const btn of skipButtons) {
+      if (isVisible(btn)) {
+        try { btn.click(); } catch {}
+      }
+    }
+
+    const adIndicators = document.querySelectorAll(
+      ".atvwebplayersdk-ad-indicator, .atvwebplayersdk-adbreak-indicator, [class*='adIndicator' i], [class*='adBreak' i], [data-testid*='ad-' i], .ad-countdown, .ad-break-container"
+    );
+    let adDetected = false;
+    for (const ind of adIndicators) {
+      if (document.body.contains(ind) && (ind.offsetParent !== null || ind.clientWidth > 0 || ind.clientHeight > 0)) {
+        adDetected = true;
+        break;
+      }
+    }
+
+    if (adDetected && !isAdCurrentlyActive) {
+      isAdCurrentlyActive = true;
+      wasMutedBeforeAd = video.muted;
+      video.muted = true;
+      video.style.opacity = "0";
+
+      let curtain = document.getElementById(AD_CURTAIN_ID);
+      if (!curtain) {
+        curtain = document.createElement("div");
+        curtain.id = AD_CURTAIN_ID;
+        curtain.innerHTML = "⚡ Reklam Atlanıyor...";
+        const container = video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, #player, .player") || video.parentElement || document.body;
+        container.appendChild(curtain);
+      }
+    }
+
+    if (isAdCurrentlyActive && adDetected) {
+      if (video.playbackRate !== 16) {
+        video.playbackRate = 16;
+      }
+      if (video.muted !== true) {
+        video.muted = true;
+      }
+      if (video.style.opacity !== "0") {
+        video.style.opacity = "0";
+      }
+    } else if (isAdCurrentlyActive && !adDetected) {
+      isAdCurrentlyActive = false;
+      video.muted = wasMutedBeforeAd;
+      video.style.opacity = "1";
+      const curtain = document.getElementById(AD_CURTAIN_ID);
+      if (curtain) curtain.remove();
+      video.playbackRate = speed;
+      applySpeed();
+    }
+  }
+
+  function ensureSubtitleStyle() {
+    let style = document.getElementById(SUBTITLE_STYLE_ID);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = SUBTITLE_STYLE_ID;
+      document.documentElement.appendChild(style);
+    }
+
+    if (!subtitleEnabled) {
+      style.textContent = "";
+      return;
+    }
+
+    style.textContent = `
+      video::cue {
+        color: ${subtitleColor} !important;
+        background-color: rgba(0, 0, 0, 0.78) !important;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95) !important;
+      }
+      .atvwebplayersdk-subtitle-text span,
+      .atvwebplayersdk-captions-text span,
+      [class*="subtitle" i] span,
+      [class*="captions" i] span,
+      .timedText span,
+      [data-testid*="subtitle" i] span,
+      [class*="Subtitle" i] span,
+      .atvwebplayersdk-subtitle-container span,
+      .atvwebplayersdk-captions-container span {
+        color: ${subtitleColor} !important;
+        text-shadow: 0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1) !important;
+      }
+    `;
+  }
+
+  function applySubtitleStyles() {
+    if (!subtitleEnabled) {
+      return;
+    }
+    ensureSubtitleStyle();
+
+    const subtitleContainers = document.querySelectorAll(
+      ".atvwebplayersdk-subtitle-text, .atvwebplayersdk-captions-text, .timedText, [class*='subtitle' i], [class*='captions' i], [data-testid*='subtitle' i]"
+    );
+
+    for (const container of subtitleContainers) {
+      if (root.contains(container) || container.id === ROOT_ID) {
+        continue;
+      }
+      const spans = container.querySelectorAll("span, div, p");
+      for (const el of spans) {
+        if (root.contains(el)) continue;
+        const inlineColor = el.style.color;
+        if (inlineColor && inlineColor !== subtitleColor) {
+          el.style.setProperty("color", subtitleColor, "important");
+          el.style.setProperty("text-shadow", "0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1)", "important");
+        }
+      }
+      if (container instanceof HTMLElement) {
+        const inlineColor = container.style.color;
+        if (inlineColor && inlineColor !== subtitleColor) {
+          container.style.setProperty("color", subtitleColor, "important");
+        }
+      }
+    }
+  }
+
+  function updateSubtitleObserver() {
+    if (!subtitleEnabled) {
+      if (subtitleObserver) {
+        subtitleObserver.disconnect();
+        currentObservedContainer = null;
+      }
+      return;
+    }
+
+    const video = findVideo();
+    const targetContainer = video 
+      ? (video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, [id*='player' i], #player, .player") || video.parentElement || document.body)
+      : document.body;
+
+    if (currentObservedContainer === targetContainer && subtitleObserver) {
+      return;
+    }
+
+    if (subtitleObserver) {
+      subtitleObserver.disconnect();
+    } else {
+      subtitleObserver = new MutationObserver((mutations) => {
+        let shouldApplySubtitles = false;
+        let shouldCheckAds = false;
+        for (const mutation of mutations) {
+          if (mutation.type === "attributes" && (mutation.attributeName === "style" || mutation.attributeName === "class")) {
+            const target = mutation.target;
+            if (!root.contains(target) && target instanceof HTMLElement) {
+              shouldApplySubtitles = true;
+              shouldCheckAds = true;
+              break;
+            }
+          } else if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
+            for (const node of mutation.addedNodes) {
+              if (node instanceof HTMLElement && !root.contains(node)) {
+                shouldApplySubtitles = true;
+                shouldCheckAds = true;
+                break;
+              }
+            }
+            if (shouldApplySubtitles) break;
+          }
+        }
+        if (shouldCheckAds) {
+          checkAndHandleAds();
+        }
+        if (shouldApplySubtitles) {
+          applySubtitleStyles();
+        }
+      });
+    }
+
+    currentObservedContainer = targetContainer;
+    subtitleObserver.observe(targetContainer, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "class"]
+    });
+  }
+
   function setSpeed(nextSpeed) {
     speed = Number(clamp(nextSpeed).toFixed(2));
     window.localStorage.setItem(STORAGE_KEY, String(speed));
-    speedButton.textContent = format(speed);
+    updateButtonDisplay();
     updateActivePreset();
     applySpeed();
+  }
+
+  function setSubtitleColor(nextColor) {
+    subtitleColor = nextColor;
+    window.localStorage.setItem(SUBTITLE_STORAGE_KEY, subtitleColor);
+    if (!subtitleEnabled) {
+      setSubtitleEnabled(true);
+      return;
+    }
+    updateButtonDisplay();
+    updateActivePreset();
+    ensureSubtitleStyle();
+    applySubtitleStyles();
+  }
+
+  function setSubtitleEnabled(enabled) {
+    subtitleEnabled = Boolean(enabled);
+    window.localStorage.setItem(SUBTITLE_ENABLED_KEY, String(subtitleEnabled));
+    updateButtonDisplay();
+    updateActivePreset();
+    ensureSubtitleStyle();
+    applySubtitleStyles();
+    updateSubtitleObserver();
   }
 
   function ensureStyle() {
@@ -84,7 +399,7 @@
         color: #f7f7f8;
         font: 650 13px/1.2 Arial, sans-serif;
         pointer-events: auto;
-        transition: opacity 160ms ease;
+        transition: opacity 220ms ease;
       }
       #${ROOT_ID}.pvsc-hidden {
         opacity: 0;
@@ -99,18 +414,21 @@
         align-items: center;
       }
       .pvsc-speed-button {
-        min-width: 46px;
+        min-width: 54px;
         height: 38px;
         padding: 0 12px;
         color: #f7f7f8;
         font: inherit;
         cursor: grab;
-        background: rgba(28, 31, 38, 0.82);
-        border: 1px solid rgba(255, 255, 255, 0.22);
+        background: rgba(28, 31, 38, 0.86);
+        border: 1px solid rgba(255, 255, 255, 0.24);
         border-radius: 10px;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
         user-select: none;
-        backdrop-filter: blur(10px);
+        backdrop-filter: blur(12px);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
       .pvsc-speed-button:active {
         cursor: grabbing;
@@ -120,23 +438,36 @@
         top: calc(100% + 8px);
         right: 0;
         display: none;
-        grid-template-columns: repeat(2, minmax(64px, auto));
-        gap: 6px;
-        min-width: 154px;
-        padding: 8px;
-        background: rgba(20, 22, 28, 0.94);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 12px;
-        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
-        backdrop-filter: blur(12px);
+        flex-direction: column;
+        gap: 10px;
+        width: 196px;
+        padding: 12px;
+        background: rgba(20, 22, 28, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 14px;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(14px);
       }
       #${ROOT_ID}.pvsc-menu-open .pvsc-menu {
+        display: flex;
+      }
+      .pvsc-section-title {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.58);
+        margin-bottom: 2px;
+      }
+      .pvsc-speed-grid {
         display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
       }
       .pvsc-menu button {
         width: 100%;
         height: 34px;
-        padding: 0 12px;
+        padding: 0 8px;
         color: #f7f7f8;
         font: inherit;
         cursor: pointer;
@@ -144,21 +475,71 @@
         border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 8px;
         user-select: none;
+        transition: background 120ms ease, border-color 120ms ease;
       }
       .pvsc-speed-button:hover,
       .pvsc-speed-button:focus,
       .pvsc-menu button:hover,
       .pvsc-menu button:focus {
-        background: rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.18);
         outline: none;
       }
       .pvsc-menu .pvsc-step {
         font-size: 17px;
+        font-weight: 700;
       }
       .pvsc-menu .pvsc-active {
         color: #ffffff;
-        border-color: rgba(99, 179, 237, 0.66);
-        background: rgba(46, 118, 211, 0.58);
+        border-color: rgba(99, 179, 237, 0.72);
+        background: rgba(46, 118, 211, 0.62);
+      }
+      .pvsc-divider {
+        height: 1px;
+        background: rgba(255, 255, 255, 0.12);
+        margin: 2px 0;
+      }
+      .pvsc-subtitle-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        height: 34px;
+        padding: 0 10px;
+        color: #f7f7f8;
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        user-select: none;
+      }
+      .pvsc-subtitle-toggle.pvsc-toggle-on {
+        background: rgba(46, 184, 114, 0.28);
+        border-color: rgba(46, 184, 114, 0.65);
+        color: #ffffff;
+      }
+      .pvsc-color-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+        padding-top: 2px;
+      }
+      .pvsc-color-swatch {
+        width: 28px !important;
+        height: 28px !important;
+        padding: 0 !important;
+        border-radius: 50% !important;
+        cursor: pointer;
+        border: 2px solid rgba(255, 255, 255, 0.28) !important;
+        position: relative;
+      }
+      .pvsc-color-swatch:hover {
+        transform: scale(1.08);
+      }
+      .pvsc-color-swatch.pvsc-swatch-active {
+        border-color: #ffffff !important;
+        box-shadow: 0 0 0 2px #3182ce, 0 0 8px rgba(255, 255, 255, 0.6);
       }
     `;
     document.documentElement.appendChild(style);
@@ -231,8 +612,8 @@
 
   function clampPosition(left, top) {
     const rect = root.getBoundingClientRect();
-    const width = rect.width || 52;
-    const height = rect.height || 36;
+    const width = rect.width || 54;
+    const height = rect.height || 38;
 
     return {
       left: Math.min(Math.max(8, left), window.innerWidth - width - 8),
@@ -258,8 +639,8 @@
 
     const closeRect = closeButton.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
-    const width = rootRect.width || 52;
-    const height = rootRect.height || 36;
+    const width = rootRect.width || 54;
+    const height = rootRect.height || 38;
     let left = closeRect.right + 10;
 
     if (left + width > window.innerWidth - 8) {
@@ -270,6 +651,9 @@
   }
 
   function refresh() {
+    ensureAdShieldStyle();
+    checkAndHandleAds();
+
     const video = findVideo();
     if (!video) {
       root.classList.add("pvsc-no-video");
@@ -278,6 +662,7 @@
     }
 
     root.classList.remove("pvsc-no-video");
+    attachVideoListeners(video);
 
     const closeButton = findCloseButton();
     if (closeButton) {
@@ -285,12 +670,25 @@
     } else if (!readSavedPosition()) {
       setPosition(window.innerWidth - 76, 78, false);
     }
+
+    updateSubtitleObserver();
+    applySubtitleStyles();
   }
 
   function updateActivePreset() {
     for (const button of menu.querySelectorAll("[data-speed]")) {
       const value = Number(button.getAttribute("data-speed"));
       button.classList.toggle("pvsc-active", Math.abs(value - speed) < 0.001);
+    }
+
+    if (subtitleToggleBtn) {
+      subtitleToggleBtn.classList.toggle("pvsc-toggle-on", subtitleEnabled);
+      subtitleToggleBtn.textContent = subtitleEnabled ? "Altyazı: Açık ✓" : "Altyazı: Kapalı";
+    }
+
+    for (const swatch of menu.querySelectorAll("[data-color]")) {
+      const colorVal = swatch.getAttribute("data-color");
+      swatch.classList.toggle("pvsc-swatch-active", subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase());
     }
   }
 
@@ -301,14 +699,18 @@
       return;
     }
 
+    attachVideoListeners(video);
     root.classList.remove("pvsc-no-video");
     root.classList.remove("pvsc-hidden");
     window.clearTimeout(hideTimer);
 
-    if (!video.paused && !isMenuOpen) {
+    if (!video.paused && !isMenuOpen && !isDragging) {
       hideTimer = window.setTimeout(() => {
-        root.classList.add("pvsc-hidden");
-      }, 2400);
+        const currentVideo = findVideo();
+        if (currentVideo && !currentVideo.paused && !isMenuOpen && !isDragging) {
+          root.classList.add("pvsc-hidden");
+        }
+      }, 2000);
     }
   }
 
@@ -325,6 +727,8 @@
   }
 
   ensureStyle();
+  ensureSubtitleStyle();
+  ensureAdShieldStyle();
 
   const existingRoot = document.getElementById(ROOT_ID);
   if (existingRoot) {
@@ -334,7 +738,7 @@
   const root = document.createElement("div");
   root.id = ROOT_ID;
   root.className = "pvsc-no-video";
-  root.setAttribute("aria-label", "Prime Video speed control");
+  root.setAttribute("aria-label", "Prime Video speed & subtitle control");
 
   const wrap = document.createElement("div");
   wrap.className = "pvsc-wrap";
@@ -342,14 +746,20 @@
   const speedButton = document.createElement("button");
   speedButton.type = "button";
   speedButton.className = "pvsc-speed-button";
-  speedButton.textContent = format(speed);
-  speedButton.title = "Playback speed";
+  speedButton.title = "Playback speed & subtitle control";
 
   const menu = document.createElement("div");
   menu.className = "pvsc-menu";
 
-  menu.appendChild(makeMenuButton("-", "pvsc-step", () => setSpeed(speed - STEP)));
-  menu.appendChild(makeMenuButton("+", "pvsc-step", () => setSpeed(speed + STEP)));
+  const speedTitle = document.createElement("div");
+  speedTitle.className = "pvsc-section-title";
+  speedTitle.textContent = "⚡ Hız Kontrolü";
+  menu.appendChild(speedTitle);
+
+  const speedGrid = document.createElement("div");
+  speedGrid.className = "pvsc-speed-grid";
+  speedGrid.appendChild(makeMenuButton("-", "pvsc-step", () => setSpeed(speed - STEP)));
+  speedGrid.appendChild(makeMenuButton("+", "pvsc-step", () => setSpeed(speed + STEP)));
 
   for (const preset of PRESET_SPEEDS) {
     const presetButton = makeMenuButton(format(preset), "", () => {
@@ -357,8 +767,49 @@
       setMenuOpen(false);
     });
     presetButton.setAttribute("data-speed", String(preset));
-    menu.appendChild(presetButton);
+    speedGrid.appendChild(presetButton);
   }
+  menu.appendChild(speedGrid);
+
+  const divider = document.createElement("div");
+  divider.className = "pvsc-divider";
+  menu.appendChild(divider);
+
+  const subtitleTitle = document.createElement("div");
+  subtitleTitle.className = "pvsc-section-title";
+  subtitleTitle.textContent = "💬 Altyazı Rengi";
+  menu.appendChild(subtitleTitle);
+
+  const subtitleToggleBtn = document.createElement("button");
+  subtitleToggleBtn.type = "button";
+  subtitleToggleBtn.className = "pvsc-subtitle-toggle";
+  subtitleToggleBtn.textContent = subtitleEnabled ? "Altyazı: Açık ✓" : "Altyazı: Kapalı";
+  subtitleToggleBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSubtitleEnabled(!subtitleEnabled);
+    showControls();
+  });
+  menu.appendChild(subtitleToggleBtn);
+
+  const colorGrid = document.createElement("div");
+  colorGrid.className = "pvsc-color-grid";
+  for (const presetColor of PRESET_COLORS) {
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "pvsc-color-swatch";
+    swatch.title = presetColor.name;
+    swatch.style.backgroundColor = presetColor.hex;
+    swatch.setAttribute("data-color", presetColor.hex);
+    swatch.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setSubtitleColor(presetColor.hex);
+      showControls();
+    });
+    colorGrid.appendChild(swatch);
+  }
+  menu.appendChild(colorGrid);
 
   wrap.append(speedButton, menu);
   root.appendChild(wrap);
@@ -368,6 +819,8 @@
   if (savedPosition) {
     setPosition(savedPosition.left, savedPosition.top, false);
   }
+
+  updateButtonDisplay();
 
   speedButton.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) {
@@ -440,6 +893,13 @@
       return;
     }
 
+    if ((event.altKey || event.shiftKey) && (event.key === "c" || event.key === "C" || event.key === "ç" || event.key === "Ç")) {
+      event.preventDefault();
+      setSubtitleEnabled(!subtitleEnabled);
+      showControls();
+      return;
+    }
+
     if (event.key === "]") {
       setSpeed(speed + STEP);
       showControls();
@@ -470,6 +930,8 @@
     installed: true,
     applySpeed,
     refresh,
+    applySubtitleStyles,
+    checkAndHandleAds,
   };
 
   return "installed";
