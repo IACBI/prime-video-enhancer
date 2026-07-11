@@ -102,7 +102,7 @@ static void CreateShortcut(string shortcutPath, string targetPath, string argume
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"$s = (New-Object -COM WScript.Shell).CreateShortcut($env:LNK_PATH); $s.TargetPath = $env:TARGET_PATH; $s.Arguments = $env:ARGS_STR; $s.IconLocation = $env:ICON_PATH; $s.Save()\"",
+            Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"$s = (New-Object -COM WScript.Shell).CreateShortcut($env:LNK_PATH); $s.TargetPath = $env:TARGET_PATH; $s.Arguments = $env:ARGS_STR; $s.IconLocation = $env:ICON_PATH; $s.Description = 'Amazon Prime Video Enhancer'; $s.Save()\"",
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -140,6 +140,17 @@ static void StartEdge(string edgePath)
 
     var shortcutPath = Path.Combine(profileDir, "PrimeVideoSpeedController.lnk");
     CreateShortcut(shortcutPath, edgePath, arguments, iconPath);
+
+    try
+    {
+        var startMenuPrograms = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+        if (!string.IsNullOrEmpty(startMenuPrograms) && Directory.Exists(startMenuPrograms))
+        {
+            var startMenuLnk = Path.Combine(startMenuPrograms, "Prime Video Enhancer.lnk");
+            CreateShortcut(startMenuLnk, edgePath, arguments, iconPath);
+        }
+    }
+    catch { }
 
     try
     {
@@ -366,8 +377,106 @@ internal static class AppIconHelper
     private static nint appIconHandle = nint.Zero;
     public static Process? EdgeProcess { get; set; }
 
+    private static bool ConvertPngToIco(string pngPath, string targetIcoPath)
+    {
+        try
+        {
+            var pngBytes = File.ReadAllBytes(pngPath);
+            using var fs = File.Create(targetIcoPath);
+            using var writer = new BinaryWriter(fs);
+            writer.Write((ushort)0);
+            writer.Write((ushort)1);
+            writer.Write((ushort)1);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write((ushort)1);
+            writer.Write((ushort)32);
+            writer.Write((uint)pngBytes.Length);
+            writer.Write((uint)22);
+            writer.Write(pngBytes);
+            return true;
+        }
+        catch { }
+        return false;
+    }
+
+    private static bool TryExtractSystemPrimeVideoIcon(string targetIcoPath)
+    {
+        try
+        {
+            var windowsAppsDir = @"C:\Program Files\WindowsApps";
+            if (Directory.Exists(windowsAppsDir))
+            {
+                try
+                {
+                    var dirs = Directory.GetDirectories(windowsAppsDir, "AmazonVideo.PrimeVideo*");
+                    foreach (var dir in dirs)
+                    {
+                        var assetsDir = Path.Combine(dir, "Assets");
+                        if (Directory.Exists(assetsDir))
+                        {
+                            string[] candidates = [
+                                "Square44x44Logo.targetsize-256.png",
+                                "Square150x150Logo.scale-100.png",
+                                "StoreLogo.scale-100.png",
+                                "LargeTile.scale-100.png"
+                            ];
+                            foreach (var cand in candidates)
+                            {
+                                var pngPath = Path.Combine(assetsDir, cand);
+                                if (File.Exists(pngPath))
+                                {
+                                    if (ConvertPngToIco(pngPath, targetIcoPath))
+                                        return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            var edgeWebApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                @"Microsoft\Edge\User Data\Default\Web Applications");
+            if (Directory.Exists(edgeWebApps))
+            {
+                var icoFiles = Directory.GetFiles(edgeWebApps, "*.ico", SearchOption.AllDirectories);
+                foreach (var ico in icoFiles)
+                {
+                    if (ico.Contains("prime", StringComparison.OrdinalIgnoreCase) || ico.Contains("amazon", StringComparison.OrdinalIgnoreCase))
+                    {
+                        File.Copy(ico, targetIcoPath, true);
+                        return true;
+                    }
+                }
+            }
+        }
+        catch { }
+        return false;
+    }
+
     public static string GetOrCreateIconPath()
     {
+        try
+        {
+            var cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrimeVideoSpeedController");
+            Directory.CreateDirectory(cacheDir);
+            var cachedIconPath = Path.Combine(cacheDir, "AppIcon.ico");
+
+            if (!File.Exists(cachedIconPath))
+            {
+                if (TryExtractSystemPrimeVideoIcon(cachedIconPath))
+                    return cachedIconPath;
+            }
+            else
+            {
+                return cachedIconPath;
+            }
+        }
+        catch { }
+
         var localPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         if (File.Exists(localPath)) return localPath;
 
