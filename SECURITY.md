@@ -2,7 +2,7 @@
 
 ## Scope
 
-Prime Video Speed & Subtitle Controller is a local Windows helper application. It launches Microsoft Edge with a dedicated profile (`--user-data-dir`) and restricts its remote debugging interface strictly to the local loopback adapter (`--remote-debugging-address=127.0.0.1` on port `9223`).
+Prime Video Enhancer (Speed, Subtitle & Ad Shield) is a local Windows helper application. It launches Microsoft Edge with a dedicated profile (`--user-data-dir`) and restricts its remote debugging interface strictly to the local loopback adapter (`--remote-debugging-address=127.0.0.1` on port `9223`).
 
 ## Supported Versions
 
