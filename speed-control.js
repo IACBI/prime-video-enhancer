@@ -36,7 +36,16 @@
   // than this, it's almost certainly a stuck or false detection rather than a
   // real ad, so playback is forcibly handed back to the user instead of racing
   // through the rest of the episode at 16x behind a black cover.
-  const AD_MAX_DURATION_MS = 90000;
+  const AD_MAX_DURATION_MS = 45000;
+
+  // After the safety valve force-exits ad mode, suppress re-engaging the visual
+  // shield for this long. Without a cooldown, a persistently-matching element
+  // (a stuck indicator, or UI we misclassify) re-engages ad mode on the very
+  // next 200ms tick after the valve fires, turning one false positive into an
+  // endless loop of black-screen/16x windows. Skip-button clicking and the
+  // network-level blocker stay active during the cooldown, so real ads are
+  // still handled — only the mute/hide/16x shield is suppressed.
+  const AD_COOLDOWN_AFTER_VALVE_MS = 120000;
 
   const AD_SKIP_BUTTON_SELECTOR =
     ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]";
@@ -68,7 +77,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.0.0") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.1.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -106,6 +115,8 @@
   let wasMutedBeforeAd = false;
   let noAdStreak = 0;
   let adModeStartedAt = 0;
+  let adCooldownUntil = 0;
+  let adHiddenVideo = null;
 
   function clamp(value) {
     return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
@@ -272,6 +283,16 @@
   // a standalone "ad" token for that one.
   const AD_WORD_TOKENS = new Set(["ad", "adbreak", "adtimer", "adindicator", "adcountdown"]);
 
+  // A real Prime Video ad indicator always displays a live countdown — either a
+  // clock ("0:27", "1:05") or a "27 s"/"27 sec"/"27 saniye" remaining-time label.
+  // Requiring countdown-shaped text is what keeps a persistently-mounted shell
+  // element (e.g. an "ad-break-container" that stays in the DOM between breaks
+  // holding a static label or episode text) from engaging the shield on normal
+  // content, which showed up to the user as a black screen with the episode
+  // racing at 16x underneath.
+  const COUNTDOWN_TEXT_RE = /(\d{1,2}:\d{2})|(\b\d{1,3}\s*(s|sn|sec|second|seconds|saniye)\b)/i;
+  const COUNTDOWN_ZERO_RE = /^0{1,2}:00$|^0\s*(s|sn|sec|second|seconds|saniye)$/i;
+
   // Splits a class/testid string into words on hyphens/underscores/whitespace and
   // camelCase boundaries, so "ad" can be matched as a whole word. This is what
   // makes the check below reject "loadTimer"/"threadIndicator"/"broadBreak"-style
@@ -319,10 +340,36 @@
       return false;
     }
     const text = (ind.textContent || "").trim();
-    if (text === "" || /^0:00$/i.test(text)) {
+    if (!COUNTDOWN_TEXT_RE.test(text) || COUNTDOWN_ZERO_RE.test(text)) {
       return false;
     }
     return true;
+  }
+
+  function hideVideoForAd(video) {
+    if (adHiddenVideo && adHiddenVideo !== video) {
+      restoreHiddenVideos();
+    }
+    adHiddenVideo = video;
+    video.dataset.pvscHidden = "1";
+    video.style.opacity = "0";
+  }
+
+  // Restores every video element the shield ever hid, not just the one
+  // findVideo() returns right now: Prime Video re-creates the <video> element on
+  // some ad/content transitions, and restoring only the current element used to
+  // leave the original one stuck at opacity:0 — a permanent black screen the
+  // safety valve couldn't undo.
+  function restoreHiddenVideos() {
+    for (const el of document.querySelectorAll("video[data-pvsc-hidden]")) {
+      el.style.opacity = "";
+      delete el.dataset.pvscHidden;
+    }
+    if (adHiddenVideo) {
+      adHiddenVideo.style.opacity = "";
+      delete adHiddenVideo.dataset.pvscHidden;
+      adHiddenVideo = null;
+    }
   }
 
   function exitAdMode(video) {
@@ -330,7 +377,7 @@
     noAdStreak = 0;
     adModeStartedAt = 0;
     video.muted = wasMutedBeforeAd;
-    video.style.opacity = "1";
+    restoreHiddenVideos();
     removeAdCover();
     video.playbackRate = speed;
     video.defaultPlaybackRate = speed;
@@ -362,13 +409,13 @@
       noAdStreak = 0;
     }
 
-    if (adDetected && !isAdCurrentlyActive) {
+    if (adDetected && !isAdCurrentlyActive && Date.now() >= adCooldownUntil) {
       isAdCurrentlyActive = true;
       adModeStartedAt = Date.now();
       wasMutedBeforeAd = video.muted;
       showAdCover(video);
       video.muted = true;
-      video.style.opacity = "0";
+      hideVideoForAd(video);
       if (video.playbackRate !== 16) video.playbackRate = 16;
       if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
       if (video.paused) {
@@ -377,6 +424,8 @@
     }
 
     if (isAdCurrentlyActive && Date.now() - adModeStartedAt > AD_MAX_DURATION_MS) {
+      adCooldownUntil = Date.now() + AD_COOLDOWN_AFTER_VALVE_MS;
+      console.warn("[pvsc] Ad shield engaged for over " + AD_MAX_DURATION_MS / 1000 + "s — treating as stuck/false detection, restoring playback and suppressing the shield for " + AD_COOLDOWN_AFTER_VALVE_MS / 1000 + "s.");
       exitAdMode(video);
       return;
     }
@@ -385,7 +434,7 @@
       if (video.playbackRate !== 16) video.playbackRate = 16;
       if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
       if (video.muted !== true) video.muted = true;
-      if (video.style.opacity !== "0") video.style.opacity = "0";
+      if (video !== adHiddenVideo || video.style.opacity !== "0") hideVideoForAd(video);
       showAdCover(video);
       if (video.paused) {
         try { video.play(); } catch {}
@@ -1108,7 +1157,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.0.0",
+    version: "3.1.0",
     applySpeed,
     refresh,
     applySubtitleStyles,
