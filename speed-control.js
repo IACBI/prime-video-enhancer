@@ -3,7 +3,7 @@
   const STYLE_ID = "pvsc-style";
   const SUBTITLE_STYLE_ID = "pvsc-subtitle-style";
   const AD_SHIELD_STYLE_ID = "pvsc-ad-shield-style";
-  const AD_FREEZE_CANVAS_ID = "pvsc-ad-freeze-canvas";
+  const AD_COVER_ID = "pvsc-ad-freeze-canvas";
   const STORAGE_KEY = "primeVideoSpeedControl.speed";
   const POSITION_KEY = "primeVideoSpeedControl.position";
   const SUBTITLE_STORAGE_KEY = "primeVideoSpeedControl.subtitleColor";
@@ -30,6 +30,13 @@
   // un-freeze the video prematurely and immediately re-trigger ad-mode on the next
   // tick, producing an audible/visible flicker right at ad boundaries.
   const AD_END_CONFIRM_TICKS = 2;
+
+  // Safety valve: real Amazon Prime Video ad breaks don't run this long. If the
+  // shield has been continuously engaged (muted, 16x, video hidden) for longer
+  // than this, it's almost certainly a stuck or false detection rather than a
+  // real ad, so playback is forcibly handed back to the user instead of racing
+  // through the rest of the episode at 16x behind a black cover.
+  const AD_MAX_DURATION_MS = 90000;
 
   const AD_SKIP_BUTTON_SELECTOR =
     ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]";
@@ -98,6 +105,7 @@
   let isAdCurrentlyActive = false;
   let wasMutedBeforeAd = false;
   let noAdStreak = 0;
+  let adModeStartedAt = 0;
 
   function clamp(value) {
     return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
@@ -222,7 +230,7 @@
         opacity: 0 !important;
         pointer-events: none !important;
       }
-      #${AD_FREEZE_CANVAS_ID} {
+      #${AD_COVER_ID} {
         position: absolute !important;
         top: 0 !important;
         left: 0 !important;
@@ -230,43 +238,69 @@
         height: 100% !important;
         z-index: 2147483640 !important;
         pointer-events: none !important;
-        object-fit: contain !important;
+        background: #000 !important;
       }
     `;
     document.documentElement.appendChild(style);
   }
 
-  function captureVideoFrame(video) {
-    try {
-      if (!video || video.readyState < 2 || video.videoWidth === 0) return null;
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas;
-    } catch {
-      return null;
-    }
-  }
-
-  function showFreezeFrame(video) {
-    let freezeCanvas = document.getElementById(AD_FREEZE_CANVAS_ID);
-    if (freezeCanvas) return; // Already showing
-    const captured = captureVideoFrame(video);
-    if (!captured) return;
-    captured.id = AD_FREEZE_CANVAS_ID;
+  // Prime Video's <video> element is always DRM/EME-protected (Widevine), and
+  // drawing a protected video frame onto a <canvas> (ctx.drawImage) throws a
+  // SecurityError from a tainted-canvas check — every browser blocks exactly this
+  // to prevent DRM bypass via screen capture. The previous implementation tried to
+  // capture a real freeze-frame via canvas, which therefore failed silently on
+  // every real ad (caught by an empty catch), leaving the video hidden
+  // (opacity: 0) with nothing drawn over it — a black screen while the video kept
+  // playing at 16x underneath. A plain opaque cover element can't fail this way:
+  // it doesn't touch the video's pixels at all, so it always renders.
+  function showAdCover(video) {
+    if (document.getElementById(AD_COVER_ID)) return; // Already showing
+    const cover = document.createElement("div");
+    cover.id = AD_COVER_ID;
     const container = video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, #player, .player") || video.parentElement || document.body;
-    container.appendChild(captured);
+    container.appendChild(cover);
   }
 
-  function removeFreezeFrame() {
-    const freezeCanvas = document.getElementById(AD_FREEZE_CANVAS_ID);
-    if (freezeCanvas) freezeCanvas.remove();
+  function removeAdCover() {
+    const cover = document.getElementById(AD_COVER_ID);
+    if (cover) cover.remove();
+  }
+
+  // "adbreak"/"adtimer" etc. cover tokens like Amazon's own
+  // ".atvwebplayersdk-adbreak-indicator", where "ad" and "break" are fused with no
+  // hyphen or camelCase boundary between them, so splitting alone wouldn't isolate
+  // a standalone "ad" token for that one.
+  const AD_WORD_TOKENS = new Set(["ad", "adbreak", "adtimer", "adindicator", "adcountdown"]);
+
+  // Splits a class/testid string into words on hyphens/underscores/whitespace and
+  // camelCase boundaries, so "ad" can be matched as a whole word. This is what
+  // makes the check below reject "loadTimer"/"threadIndicator"/"broadBreak"-style
+  // unrelated UI (a plain substring match like [class*="adTimer" i] happily
+  // matches those, since "ad" is just letters 3-4 of "load"/"thread"/"broad")
+  // while still accepting "adTimer", "atvwebplayersdk-ad-timer", "myAdBreak", etc.
+  function containsAdWord(str) {
+    if (!str) return false;
+    const tokens = str
+      .split(/[-_\s]+|(?<=[a-z0-9])(?=[A-Z])/)
+      .map((token) => token.toLowerCase());
+    return tokens.some((token) => AD_WORD_TOKENS.has(token));
   }
 
   function isAdIndicatorActive(ind) {
     if (!ind || !document.body.contains(ind)) return false;
+    const className = typeof ind.className === "string" ? ind.className : "";
+    const testId = (ind.getAttribute && ind.getAttribute("data-testid")) || "";
+    // The selector list that produces candidates for this function relies partly
+    // on broad `[class*="ad..." i]`/`[data-testid*="ad-..." i]` substring
+    // selectors (kept broad to catch Amazon renaming their specific classes).
+    // Require "ad" to actually appear as a standalone word so unrelated
+    // elements (a "loadTimer"/buffering spinner, a "threadIndicator", etc.)
+    // that merely contain the letters "ad" don't get treated as real ad UI —
+    // this was causing normal buffering/loading UI to trigger the ad shield
+    // (mute + 16x speed + hidden video) on ordinary episode playback.
+    if (!containsAdWord(className) && !containsAdWord(testId)) {
+      return false;
+    }
     // Use getBoundingClientRect + getComputedStyle rather than offsetParent/clientWidth:
     // offsetParent is null for position:fixed elements even when they're genuinely
     // visible, which previously caused false "hidden" results for such elements.
@@ -281,16 +315,26 @@
     if (computed.display === "none" || computed.visibility === "hidden") {
       return false;
     }
-    if (typeof ind.className === "string") {
-      if (ind.className.includes("atvwebplayersdk-element-off") || ind.className.includes("atvwebplayersdk-visibility-hidden")) {
-        return false;
-      }
+    if (className.includes("atvwebplayersdk-element-off") || className.includes("atvwebplayersdk-visibility-hidden")) {
+      return false;
     }
     const text = (ind.textContent || "").trim();
     if (text === "" || /^0:00$/i.test(text)) {
       return false;
     }
     return true;
+  }
+
+  function exitAdMode(video) {
+    isAdCurrentlyActive = false;
+    noAdStreak = 0;
+    adModeStartedAt = 0;
+    video.muted = wasMutedBeforeAd;
+    video.style.opacity = "1";
+    removeAdCover();
+    video.playbackRate = speed;
+    video.defaultPlaybackRate = speed;
+    applySpeed();
   }
 
   function checkAndHandleAds() {
@@ -320,8 +364,9 @@
 
     if (adDetected && !isAdCurrentlyActive) {
       isAdCurrentlyActive = true;
+      adModeStartedAt = Date.now();
       wasMutedBeforeAd = video.muted;
-      showFreezeFrame(video);
+      showAdCover(video);
       video.muted = true;
       video.style.opacity = "0";
       if (video.playbackRate !== 16) video.playbackRate = 16;
@@ -331,15 +376,17 @@
       }
     }
 
+    if (isAdCurrentlyActive && Date.now() - adModeStartedAt > AD_MAX_DURATION_MS) {
+      exitAdMode(video);
+      return;
+    }
+
     if (isAdCurrentlyActive && adDetected) {
       if (video.playbackRate !== 16) video.playbackRate = 16;
       if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
       if (video.muted !== true) video.muted = true;
       if (video.style.opacity !== "0") video.style.opacity = "0";
-      // Retry capturing the freeze-frame if it failed at ad-start (e.g. the video's
-      // next frame hadn't decoded yet) — showFreezeFrame() itself no-ops once a
-      // canvas is already showing, so this is safe to call every tick.
-      showFreezeFrame(video);
+      showAdCover(video);
       if (video.paused) {
         try { video.play(); } catch {}
       }
@@ -349,14 +396,7 @@
       // Prime Video's own re-render at the ad/content boundary.
       noAdStreak += 1;
       if (noAdStreak >= AD_END_CONFIRM_TICKS) {
-        noAdStreak = 0;
-        isAdCurrentlyActive = false;
-        video.muted = wasMutedBeforeAd;
-        video.style.opacity = "1";
-        removeFreezeFrame();
-        video.playbackRate = speed;
-        video.defaultPlaybackRate = speed;
-        applySpeed();
+        exitAdMode(video);
       }
     }
   }
