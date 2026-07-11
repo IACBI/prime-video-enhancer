@@ -99,20 +99,29 @@ static void CreateShortcut(string shortcutPath, string targetPath, string argume
 {
     try
     {
-        var psi = new ProcessStartInfo
+        if (OperatingSystem.IsWindows())
         {
-            FileName = "powershell.exe",
-            Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"$s = (New-Object -COM WScript.Shell).CreateShortcut($env:LNK_PATH); $s.TargetPath = $env:TARGET_PATH; $s.Arguments = $env:ARGS_STR; $s.IconLocation = $env:ICON_PATH; $s.Description = 'Amazon Prime Video Enhancer'; $s.Save()\"",
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.Environment["LNK_PATH"] = shortcutPath;
-        psi.Environment["TARGET_PATH"] = targetPath;
-        psi.Environment["ARGS_STR"] = arguments;
-        psi.Environment["ICON_PATH"] = iconPath;
+            var link = (AppIconHelper.IShellLinkW)new AppIconHelper.ShellLink();
+            link.SetPath(targetPath);
+            link.SetArguments(arguments);
+            if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
+            {
+                link.SetIconLocation(iconPath, 0);
+            }
+            link.SetDescription("Amazon Prime Video Enhancer");
 
-        var proc = Process.Start(psi);
-        proc?.WaitForExit(2000);
+            if (link is AppIconHelper.IPropertyStore store)
+            {
+                var pkeyAumid = new AppIconHelper.PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
+                var pvAumid = new AppIconHelper.PROPVARIANT { vt = 31, pwszVal = Marshal.StringToCoTaskMemUni("PrimeVideoSpeedController.App") };
+                store.SetValue(ref pkeyAumid, ref pvAumid);
+                store.Commit();
+                Marshal.FreeCoTaskMem(pvAumid.pwszVal);
+            }
+
+            var persistFile = (AppIconHelper.IPersistFile)link;
+            persistFile.Save(shortcutPath, true);
+        }
     }
     catch { }
 }
@@ -136,6 +145,7 @@ static void StartEdge(string edgePath)
         $"--user-data-dir=\"{profileDir}\"",
         "--no-first-run",
         "--new-window",
+        "--app-id=\"PrimeVideoSpeedController.App\"",
         $"--app=\"{PrimeVideoUrl}\"");
 
     var shortcutPath = Path.Combine(profileDir, "PrimeVideoSpeedController.lnk");
@@ -372,6 +382,44 @@ internal static class AppIconHelper
         int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
         int SetValue(ref PROPERTYKEY key, ref PROPVARIANT propvar);
         int Commit();
+    }
+
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    public class ShellLink { }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+    public interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, nint pfd, int fFlags);
+        void GetIDList(out nint ppidl);
+        void SetIDList(nint pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+        void Resolve(nint hwnd, int fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, Guid("0000010b-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        [PreserveSig]
+        int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string? pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
     }
 
     private static nint appIconHandle = nint.Zero;
