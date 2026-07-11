@@ -406,36 +406,47 @@ internal static class AppIconHelper
     {
         try
         {
-            var windowsAppsDir = @"C:\Program Files\WindowsApps";
-            if (Directory.Exists(windowsAppsDir))
+            string? installDir = null;
+            try
             {
-                try
+                var psi = new ProcessStartInfo
                 {
-                    var dirs = Directory.GetDirectories(windowsAppsDir, "AmazonVideo.PrimeVideo*");
-                    foreach (var dir in dirs)
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"(Get-AppxPackage *AmazonVideo* -ErrorAction SilentlyContinue).InstallLocation\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc != null)
+                {
+                    installDir = proc.StandardOutput.ReadToEnd().Trim();
+                    proc.WaitForExit(2000);
+                }
+            }
+            catch { }
+
+            if (!string.IsNullOrEmpty(installDir) && Directory.Exists(installDir))
+            {
+                var assetsDir = Path.Combine(installDir, "Assets");
+                if (Directory.Exists(assetsDir))
+                {
+                    string[] candidates = [
+                        "Square44x44Logo.targetsize-256.png",
+                        "Square150x150Logo.scale-100.png",
+                        "StoreLogo.scale-100.png",
+                        "LargeTile.scale-100.png"
+                    ];
+                    foreach (var cand in candidates)
                     {
-                        var assetsDir = Path.Combine(dir, "Assets");
-                        if (Directory.Exists(assetsDir))
+                        var pngPath = Path.Combine(assetsDir, cand);
+                        if (File.Exists(pngPath))
                         {
-                            string[] candidates = [
-                                "Square44x44Logo.targetsize-256.png",
-                                "Square150x150Logo.scale-100.png",
-                                "StoreLogo.scale-100.png",
-                                "LargeTile.scale-100.png"
-                            ];
-                            foreach (var cand in candidates)
-                            {
-                                var pngPath = Path.Combine(assetsDir, cand);
-                                if (File.Exists(pngPath))
-                                {
-                                    if (ConvertPngToIco(pngPath, targetIcoPath))
-                                        return true;
-                                }
-                            }
+                            if (ConvertPngToIco(pngPath, targetIcoPath))
+                                return true;
                         }
                     }
                 }
-                catch { }
             }
 
             var edgeWebApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -530,6 +541,8 @@ internal static class AppIconHelper
         }
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, bool> DedicatedPidCache = new();
+
     private static bool IsOurDedicatedEdgeProcess(uint windowPid, string titleStr)
     {
         if (EdgeProcess != null && !EdgeProcess.HasExited && windowPid == EdgeProcess.Id)
@@ -555,9 +568,45 @@ internal static class AppIconHelper
                 return false;
 
             // 3. Must match Prime Video or Amazon in the title
-            if (titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) || titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
+            if (!titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) && !titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (DedicatedPidCache.TryGetValue(windowPid, out var isDedicated))
+                return isDedicated;
+
+            bool verified = false;
+            try
             {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId = {windowPid}').CommandLine\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var cmdProc = Process.Start(psi);
+                if (cmdProc != null)
+                {
+                    var cmdLine = cmdProc.StandardOutput.ReadToEnd();
+                    cmdProc.WaitForExit(1000);
+                    if (cmdLine.Contains("9223") || cmdLine.Contains("PrimeVideoSpeedController"))
+                    {
+                        verified = true;
+                    }
+                }
+            }
+            catch { }
+
+            if (verified)
+            {
+                DedicatedPidCache[windowPid] = true;
                 return true;
+            }
+            else
+            {
+                DedicatedPidCache[windowPid] = false;
+                return false;
             }
         }
         catch { }
