@@ -7,6 +7,11 @@ using System.Text.Json;
 const int RemoteDebuggingPort = 9223;
 const string PrimeVideoUrl = "https://www.primevideo.com/";
 const string ScriptFileName = "speed-control.js";
+// Must match the `version` set on window.__primeVideoSpeedControl in
+// speed-control.js. If they drift, the already-installed fast check either
+// never matches (wasteful re-injection every poll) or — worse — matches an
+// old script and a fixed speed-control.js is never injected into a running tab.
+const string ScriptVersion = "3.1.0";
 
 var edgePath = FindEdgePath();
 if (edgePath is null)
@@ -229,7 +234,7 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
     {
         id = 11,
         method = "Network.setBlockedURLs",
-        @params = new { urls = AdBlocker.Patterns }
+        @params = new { urls = AdBlocker.SafeBlockPatterns }
     });
     await socket.SendAsync(Encoding.UTF8.GetBytes(blockedUrlsPayload), WebSocketMessageType.Text, true, cts.Token);
 
@@ -243,7 +248,7 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
     // The persistent interceptor is the single owner of Fetch interception per target.
 
     // --- Script injection (check if already installed with correct version) ---
-    const string fastCheckExpression = "(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '3.0.0' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
+    string fastCheckExpression = $"(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '{ScriptVersion}' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
     var checkPayload = JsonSerializer.Serialize(new
     {
         id = 1,
@@ -494,13 +499,14 @@ static JsonSerializerOptions JsonOptions()
 
 internal static class AdBlocker
 {
-    // Single source of truth for ad/telemetry URL glob patterns, consumed by both
-    // Network.setBlockedURLs and the Fetch.enable interception patterns. Wildcards
+    // Host-anchored ad/telemetry URL glob patterns. Every entry here names an ad
+    // or tracking host, so these are safe to hand to Network.setBlockedURLs,
+    // which hard-fails matching requests with no further inspection. Wildcards
     // are broadened (e.g. "*aax-*.amazon-adsystem.com*") to cover regional edge
     // hosts without needing a new entry per region, and to avoid the drift that
     // previously existed between this list and a second, hand-maintained copy
     // inlined in InjectSpeedControl.
-    public static readonly string[] Patterns = new[]
+    public static readonly string[] SafeBlockPatterns = new[]
     {
         "*amazon-adsystem.com*",
         "*aax-*.amazon-adsystem.com*",
@@ -512,16 +518,9 @@ internal static class AdBlocker
         "*device-metrics*.amazon.com*",
         "*mads*.amazon.com*",
         "*m.media-amazon.com/images/G/01/csm/*",
-        "*csm/csa*",
         "*a2z.com/telemetry*",
         "*a2z.com/gp/uedata*",
         "*completion.amazon.com/api/2017/suggestions*",
-        "*/vast/*",
-        "*/vpaid/*",
-        "*/vast.xml*",
-        "*/VAST*",
-        "*/ad-manifest*",
-        "*/interstitial*",
         "*doubleclick.net*",
         "*googlesyndication.com*",
         "*googleadservices.com*",
@@ -549,6 +548,29 @@ internal static class AdBlocker
         "*yieldmo.com*"
     };
 
+    // Generic path-shaped globs (no host component). These are ONLY safe as
+    // Fetch.enable interception patterns, because a paused request still goes
+    // through IsAdRequest — which scopes path heuristics to first-party Amazon
+    // hosts — before anything is blocked; a non-ad match is simply continued.
+    // Handing these to Network.setBlockedURLs (as was done before) hard-blocked
+    // ANY host whose URL contained e.g. "/interstitial" or "/VAST", which can
+    // kill legitimate video CDN segment requests and stall/black-screen playback.
+    static readonly string[] GenericPathGlobs = new[]
+    {
+        "*/vast/*",
+        "*/vpaid/*",
+        "*/vast.xml*",
+        "*/VAST*",
+        "*/ad-manifest*",
+        "*/interstitial*",
+        "*csm/csa*"
+    };
+
+    // Interception patterns for Fetch.enable: everything in SafeBlockPatterns
+    // plus the generic path globs described above.
+    public static readonly string[] Patterns =
+        SafeBlockPatterns.Concat(GenericPathGlobs).ToArray();
+
     static readonly HashSet<string> Domains = new(StringComparer.OrdinalIgnoreCase)
     {
         "amazon-adsystem.com", "unagi.amazon.com", "unagi-na.amazon.com",
@@ -571,7 +593,26 @@ internal static class AdBlocker
         "/aax2/", "/e/dtb/", "/telemetry", "/gp/uedata", "/csm/"
     };
 
+    // Hosts on which the generic PathPatterns above are allowed to match. Prime
+    // Video serves its VAST/telemetry/metrics endpoints from first-party Amazon
+    // infrastructure, so scoping the path heuristics here keeps them effective
+    // while guaranteeing they can never hard-fail a request to a third-party
+    // video CDN whose segment/license URLs merely happen to contain a string
+    // like "/interstitial" or "/csm/" — failing such a request with
+    // BlockedByClient kills real playback (black screen / stalled stream).
+    static readonly string[] PathPatternHosts = new[]
+    {
+        "amazon.com", "primevideo.com", "media-amazon.com", "a2z.com",
+        "amazon.co.uk", "amazon.de", "amazon.co.jp", "amazon.in", "amazon.com.br",
+        "amazon.com.mx", "amazon.es", "amazon.it", "amazon.fr", "amazon.ca",
+        "amazon.com.au", "amazon.nl", "amazon.se", "amazon.com.tr", "amazon-adsystem.com"
+    };
+
     public static readonly HashSet<string> ActiveInterceptors = new();
+
+    static bool HostMatches(string host, string domain) =>
+        host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+        host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsAdRequest(string url)
     {
@@ -582,10 +623,21 @@ internal static class AdBlocker
             var host = uri.Host;
             foreach (var domain in Domains)
             {
-                if (host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
-                    host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase))
+                if (HostMatches(host, domain))
                     return true;
             }
+            // Generic path heuristics only apply to first-party Amazon hosts; see
+            // PathPatternHosts for why.
+            var pathHeuristicsApply = false;
+            foreach (var trusted in PathPatternHosts)
+            {
+                if (HostMatches(host, trusted))
+                {
+                    pathHeuristicsApply = true;
+                    break;
+                }
+            }
+            if (!pathHeuristicsApply) return false;
             var pathAndQuery = uri.PathAndQuery;
             foreach (var pattern in PathPatterns)
             {
