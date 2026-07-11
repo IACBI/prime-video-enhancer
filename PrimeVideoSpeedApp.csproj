@@ -10,6 +10,8 @@
   <ItemGroup>
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="speed-control.js" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets\AppIcon.ico" LogicalName="PrimeVideoSpeedApp.Assets.AppIcon.ico" />
+    <EmbeddedResource Include="speed-control.js" LogicalName="PrimeVideoSpeedApp.speed-control.js" />
   </ItemGroup>
 
   <Target Name="GenerateAppIcon" BeforeTargets="BeforeBuild" Condition="!Exists('Assets\AppIcon.ico')">

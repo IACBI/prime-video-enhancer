@@ -76,12 +76,23 @@ static string? FindEdgePath()
 static string LoadInjectionScript()
 {
     var scriptPath = Path.Combine(AppContext.BaseDirectory, ScriptFileName);
-    if (!File.Exists(scriptPath))
+    if (File.Exists(scriptPath))
     {
-        throw new FileNotFoundException($"Required script file was not found: {scriptPath}");
+        return File.ReadAllText(scriptPath, Encoding.UTF8);
     }
 
-    return File.ReadAllText(scriptPath, Encoding.UTF8);
+    try
+    {
+        using var stream = typeof(Program).Assembly.GetManifestResourceStream("PrimeVideoSpeedApp.speed-control.js");
+        if (stream != null)
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            return reader.ReadToEnd();
+        }
+    }
+    catch { }
+
+    throw new FileNotFoundException($"Required script file was not found locally or embedded: {scriptPath}");
 }
 
 static void CreateShortcut(string shortcutPath, string targetPath, string arguments, string iconPath)
@@ -116,7 +127,7 @@ static void StartEdge(string edgePath)
     Directory.CreateDirectory(profileDir);
 
     AppIconHelper.EnsureAppIconLoaded();
-    var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+    var iconPath = AppIconHelper.GetOrCreateIconPath();
 
     var arguments = string.Join(
         " ",
@@ -355,30 +366,55 @@ internal static class AppIconHelper
     private static nint appIconHandle = nint.Zero;
     public static Process? EdgeProcess { get; set; }
 
+    public static string GetOrCreateIconPath()
+    {
+        var localPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (File.Exists(localPath)) return localPath;
+
+        try
+        {
+            var psScript = Path.Combine(AppContext.BaseDirectory, "Assets", "generate-app-icon.ps1");
+            if (File.Exists(psScript))
+            {
+                var proc = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{psScript}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                proc?.WaitForExit(3000);
+            }
+        }
+        catch { }
+
+        if (File.Exists(localPath)) return localPath;
+
+        try
+        {
+            var cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrimeVideoSpeedController");
+            Directory.CreateDirectory(cacheDir);
+            var cachedIconPath = Path.Combine(cacheDir, "AppIcon.ico");
+            if (!File.Exists(cachedIconPath))
+            {
+                using var stream = typeof(AppIconHelper).Assembly.GetManifestResourceStream("PrimeVideoSpeedApp.Assets.AppIcon.ico");
+                if (stream != null)
+                {
+                    using var fs = File.Create(cachedIconPath);
+                    stream.CopyTo(fs);
+                }
+            }
+            if (File.Exists(cachedIconPath)) return cachedIconPath;
+        }
+        catch { }
+
+        return localPath;
+    }
+
     public static void EnsureAppIconLoaded()
     {
         if (appIconHandle != nint.Zero) return;
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-        if (!File.Exists(iconPath))
-        {
-            try
-            {
-                var psScript = Path.Combine(AppContext.BaseDirectory, "Assets", "generate-app-icon.ps1");
-                if (File.Exists(psScript))
-                {
-                    var proc = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "powershell.exe",
-                        Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{psScript}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    });
-                    proc?.WaitForExit(3000);
-                }
-            }
-            catch { }
-        }
-
+        var iconPath = GetOrCreateIconPath();
         if (File.Exists(iconPath))
         {
             appIconHandle = LoadImage(nint.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
@@ -425,7 +461,7 @@ internal static class AppIconHelper
         EnsureAppIconLoaded();
         if (appIconHandle == nint.Zero) return;
 
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        var iconPath = GetOrCreateIconPath();
         var exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
         var storeGuid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
         var pkeyAumid = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
