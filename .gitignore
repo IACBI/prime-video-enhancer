@@ -12,3 +12,4 @@ Assets/AppIcon.ico
 *.bak
 *.cache
 TestResults/
+dist/
