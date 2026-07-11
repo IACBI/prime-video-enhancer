@@ -3,7 +3,7 @@
   const STYLE_ID = "pvsc-style";
   const SUBTITLE_STYLE_ID = "pvsc-subtitle-style";
   const AD_SHIELD_STYLE_ID = "pvsc-ad-shield-style";
-  const AD_CURTAIN_ID = "pvsc-ad-curtain";
+  const AD_FREEZE_CANVAS_ID = "pvsc-ad-freeze-canvas";
   const STORAGE_KEY = "primeVideoSpeedControl.speed";
   const POSITION_KEY = "primeVideoSpeedControl.position";
   const SUBTITLE_STORAGE_KEY = "primeVideoSpeedControl.subtitleColor";
@@ -24,7 +24,7 @@
     { name: "Mavi", hex: "#00FFFF" },
   ];
 
-  if (window.__primeVideoSpeedControl?.installed) {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.0.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -81,7 +81,24 @@
 
   function findVideo() {
     const videos = Array.from(document.querySelectorAll("video"));
-    return videos.find((video) => video.readyState > 0) || videos[0] || null;
+    return (
+      videos.find((video) => video.readyState > 0) ||
+      videos.find((video) => video.currentSrc || video.src) ||
+      videos[0] ||
+      null
+    );
+  }
+
+  function handleVideoPlaybackState() {
+    if (!attachedVideo) return;
+    if (isAdCurrentlyActive) {
+      if (attachedVideo.playbackRate !== 16) attachedVideo.playbackRate = 16;
+      if (attachedVideo.defaultPlaybackRate !== 16) attachedVideo.defaultPlaybackRate = 16;
+      if (attachedVideo.muted !== true) attachedVideo.muted = true;
+    } else {
+      if (attachedVideo.playbackRate !== speed) attachedVideo.playbackRate = speed;
+      if (attachedVideo.defaultPlaybackRate !== speed) attachedVideo.defaultPlaybackRate = speed;
+    }
   }
 
   function attachVideoListeners(video) {
@@ -93,24 +110,36 @@
       attachedVideo.removeEventListener("playing", showControls);
       attachedVideo.removeEventListener("pause", showControls);
       attachedVideo.removeEventListener("seeked", showControls);
+      attachedVideo.removeEventListener("ratechange", handleVideoPlaybackState);
+      attachedVideo.removeEventListener("play", handleVideoPlaybackState);
+      attachedVideo.removeEventListener("playing", handleVideoPlaybackState);
+      attachedVideo.removeEventListener("timeupdate", handleVideoPlaybackState);
     }
     attachedVideo = video;
     attachedVideo.addEventListener("play", showControls, { passive: true });
     attachedVideo.addEventListener("playing", showControls, { passive: true });
     attachedVideo.addEventListener("pause", showControls, { passive: true });
     attachedVideo.addEventListener("seeked", showControls, { passive: true });
+    attachedVideo.addEventListener("ratechange", handleVideoPlaybackState, { passive: true });
+    attachedVideo.addEventListener("play", handleVideoPlaybackState, { passive: true });
+    attachedVideo.addEventListener("playing", handleVideoPlaybackState, { passive: true });
+    attachedVideo.addEventListener("timeupdate", handleVideoPlaybackState, { passive: true });
     showControls();
   }
 
   function applySpeed() {
-    if (isAdCurrentlyActive) {
-      return;
-    }
     const video = findVideo();
     if (!video) {
       return;
     }
     attachVideoListeners(video);
+
+    if (isAdCurrentlyActive) {
+      if (video.playbackRate !== 16) video.playbackRate = 16;
+      if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
+      if (video.muted !== true) video.muted = true;
+      return;
+    }
 
     if (video.playbackRate !== speed) {
       video.playbackRate = speed;
@@ -122,43 +151,100 @@
   }
 
   function ensureAdShieldStyle() {
-    if (document.getElementById(AD_SHIELD_STYLE_ID)) {
-      return;
+    let style = document.getElementById(AD_SHIELD_STYLE_ID);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = AD_SHIELD_STYLE_ID;
+      document.documentElement.appendChild(style);
     }
-    const style = document.createElement("style");
-    style.id = AD_SHIELD_STYLE_ID;
     style.textContent = `
       .atvwebplayersdk-ad-indicator,
       .atvwebplayersdk-adbreak-indicator,
-      .ad-countdown,
-      [data-testid*="ad-" i],
-      [data-testid*="adIndicator" i],
+      .atvwebplayersdk-ad-timer,
+      .atvwebplayersdk-ad-timer-countdown,
+      .atvwebplayersdk-ad-timer-text,
+      .atvwebplayersdk-ad-timer-ad-text,
+      .atvwebplayersdk-ad-timer-remaining-time,
+      .atvwebplayersdk-ad-resume-message,
       [class*="adIndicator" i],
       [class*="adBreak" i],
+      [class*="adTimer" i],
+      [class*="adCountdown" i],
+      [class*="ad-timer" i],
+      [class*="ad-break" i],
+      [class*="ad-countdown" i],
+      [data-testid*="ad-indicator" i],
+      [data-testid*="ad-break" i],
+      [data-testid*="ad-timer" i],
+      [data-testid*="ad-countdown" i],
       .ad-timer,
-      .ad-break-container {
-        display: none !important;
+      .ad-countdown,
+      .ad-break-container,
+      .dv-signup-button,
+      [class*="dv-signup-button" i] {
         opacity: 0 !important;
         pointer-events: none !important;
       }
-      #${AD_CURTAIN_ID} {
+      #${AD_FREEZE_CANVAS_ID} {
         position: absolute !important;
         top: 0 !important;
         left: 0 !important;
         width: 100% !important;
         height: 100% !important;
-        background: #08090c !important;
         z-index: 2147483640 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        color: #f7f7f8 !important;
-        font: 700 22px/1.4 Arial, sans-serif !important;
-        letter-spacing: 1px !important;
-        pointer-events: auto !important;
+        pointer-events: none !important;
+        object-fit: contain !important;
       }
     `;
-    document.documentElement.appendChild(style);
+  }
+
+  function captureVideoFrame(video) {
+    try {
+      if (!video || video.readyState < 2 || video.videoWidth === 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    } catch {
+      return null;
+    }
+  }
+
+  function showFreezeFrame(video) {
+    let freezeCanvas = document.getElementById(AD_FREEZE_CANVAS_ID);
+    if (freezeCanvas) return; // Already showing
+    const captured = captureVideoFrame(video);
+    if (!captured) return;
+    captured.id = AD_FREEZE_CANVAS_ID;
+    const container = video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, #player, .player") || video.parentElement || document.body;
+    container.appendChild(captured);
+  }
+
+  function removeFreezeFrame() {
+    const freezeCanvas = document.getElementById(AD_FREEZE_CANVAS_ID);
+    if (freezeCanvas) freezeCanvas.remove();
+  }
+
+  function isAdIndicatorActive(ind) {
+    if (!ind || !document.body.contains(ind)) return false;
+    if (ind.offsetParent === null && ind.clientWidth === 0 && ind.clientHeight === 0) {
+      return false;
+    }
+    if (typeof ind.className === "string") {
+      if (ind.className.includes("atvwebplayersdk-element-off") || ind.className.includes("atvwebplayersdk-visibility-hidden")) {
+        return false;
+      }
+    }
+    if (ind.style.display === "none" || ind.style.visibility === "hidden") {
+      return false;
+    }
+    const text = (ind.textContent || "").trim();
+    if (/^0:00$/i.test(text)) {
+      return false;
+    }
+    return true;
   }
 
   function checkAndHandleAds() {
@@ -167,20 +253,41 @@
     if (!video) return;
 
     const skipButtons = document.querySelectorAll(
-      ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], button[title*='skip' i]"
+      ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]"
     );
     for (const btn of skipButtons) {
-      if (isVisible(btn)) {
+      if (document.body.contains(btn) && (btn.offsetParent !== null || btn.clientWidth > 0 || btn.clientHeight > 0 || btn.style.display !== "none")) {
         try { btn.click(); } catch {}
       }
     }
 
-    const adIndicators = document.querySelectorAll(
-      ".atvwebplayersdk-ad-indicator, .atvwebplayersdk-adbreak-indicator, [class*='adIndicator' i], [class*='adBreak' i], [data-testid*='ad-' i], .ad-countdown, .ad-break-container"
-    );
+    const adIndicatorSelectors = [
+      ".atvwebplayersdk-ad-timer-countdown",
+      ".atvwebplayersdk-ad-timer",
+      ".atvwebplayersdk-ad-timer-text",
+      ".atvwebplayersdk-ad-timer-remaining-time",
+      ".atvwebplayersdk-ad-resume-message",
+      ".atvwebplayersdk-ad-indicator",
+      ".atvwebplayersdk-adbreak-indicator",
+      "[class*='adIndicator' i]",
+      "[class*='adBreak' i]",
+      "[class*='adTimer' i]",
+      "[class*='adCountdown' i]",
+      "[class*='ad-timer' i]",
+      "[class*='ad-break' i]",
+      "[class*='ad-countdown' i]",
+      "[data-testid*='ad-indicator' i]",
+      "[data-testid*='ad-break' i]",
+      "[data-testid*='ad-timer' i]",
+      "[data-testid*='ad-countdown' i]",
+      ".ad-timer",
+      ".ad-countdown",
+      ".ad-break-container"
+    ];
+    const adIndicators = document.querySelectorAll(adIndicatorSelectors.join(", "));
     let adDetected = false;
     for (const ind of adIndicators) {
-      if (document.body.contains(ind) && (ind.offsetParent !== null || ind.clientWidth > 0 || ind.clientHeight > 0)) {
+      if (isAdIndicatorActive(ind)) {
         adDetected = true;
         break;
       }
@@ -189,36 +296,31 @@
     if (adDetected && !isAdCurrentlyActive) {
       isAdCurrentlyActive = true;
       wasMutedBeforeAd = video.muted;
+      showFreezeFrame(video);
       video.muted = true;
       video.style.opacity = "0";
-
-      let curtain = document.getElementById(AD_CURTAIN_ID);
-      if (!curtain) {
-        curtain = document.createElement("div");
-        curtain.id = AD_CURTAIN_ID;
-        curtain.innerHTML = "⚡ Reklam Atlanıyor...";
-        const container = video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, #player, .player") || video.parentElement || document.body;
-        container.appendChild(curtain);
+      if (video.playbackRate !== 16) video.playbackRate = 16;
+      if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
+      if (video.paused) {
+        try { video.play(); } catch {}
       }
     }
 
     if (isAdCurrentlyActive && adDetected) {
-      if (video.playbackRate !== 16) {
-        video.playbackRate = 16;
-      }
-      if (video.muted !== true) {
-        video.muted = true;
-      }
-      if (video.style.opacity !== "0") {
-        video.style.opacity = "0";
+      if (video.playbackRate !== 16) video.playbackRate = 16;
+      if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
+      if (video.muted !== true) video.muted = true;
+      if (video.style.opacity !== "0") video.style.opacity = "0";
+      if (video.paused) {
+        try { video.play(); } catch {}
       }
     } else if (isAdCurrentlyActive && !adDetected) {
       isAdCurrentlyActive = false;
       video.muted = wasMutedBeforeAd;
       video.style.opacity = "1";
-      const curtain = document.getElementById(AD_CURTAIN_ID);
-      if (curtain) curtain.remove();
+      removeFreezeFrame();
       video.playbackRate = speed;
+      video.defaultPlaybackRate = speed;
       applySpeed();
     }
   }
@@ -922,8 +1024,9 @@
     setPosition(rect.left, rect.top, Boolean(readSavedPosition()));
     refresh();
   });
-  window.setInterval(applySpeed, 1000);
-  window.setInterval(refresh, 1000);
+  window.setInterval(applySpeed, 200);
+  window.setInterval(checkAndHandleAds, 200);
+  window.setInterval(refresh, 500);
 
   updateActivePreset();
   applySpeed();
@@ -931,6 +1034,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
+    version: "3.0.0",
     applySpeed,
     refresh,
     applySubtitleStyles,

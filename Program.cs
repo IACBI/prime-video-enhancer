@@ -31,6 +31,7 @@ while (true)
 {
     try
     {
+        script = LoadInjectionScript();
         var targets = await GetTargets(httpClient);
         foreach (var target in targets)
         {
@@ -208,43 +209,87 @@ static bool IsPrimeVideoTarget(DebugTarget target)
         || target.Url.Contains("amazon.es/gp/video", StringComparison.OrdinalIgnoreCase);
 }
 
+
 static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
 {
     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
     using var socket = new ClientWebSocket();
     await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), cts.Token);
 
+    // --- Layer 1: Network.setBlockedURLs (legacy, broad pattern matching) ---
     var enableNetworkPayload = JsonSerializer.Serialize(new
     {
         id = 10,
         method = "Network.enable",
         @params = new { }
     });
-    var enableNetworkBytes = Encoding.UTF8.GetBytes(enableNetworkPayload);
-    await socket.SendAsync(enableNetworkBytes, WebSocketMessageType.Text, true, cts.Token);
+    await socket.SendAsync(Encoding.UTF8.GetBytes(enableNetworkPayload), WebSocketMessageType.Text, true, cts.Token);
 
     var blockedUrlsPayload = JsonSerializer.Serialize(new
     {
         id = 11,
         method = "Network.setBlockedURLs",
+        @params = new { urls = AdBlocker.Patterns }
+    });
+    await socket.SendAsync(Encoding.UTF8.GetBytes(blockedUrlsPayload), WebSocketMessageType.Text, true, cts.Token);
+
+    // --- Layer 2: Fetch.enable (uBlock-style request interception) ---
+    var fetchEnablePayload = JsonSerializer.Serialize(new
+    {
+        id = 12,
+        method = "Fetch.enable",
         @params = new
         {
-            urls = new[]
+            patterns = new object[]
             {
-                "*amazon-adsystem.com*",
-                "*a2z.com/telemetry*",
-                "*flashtalking.com*",
-                "*scorecardresearch.com*",
-                "*doubleclick.net*",
-                "*fwmrm.net*",
-                "*innovid.com*"
+                new { urlPattern = "*amazon-adsystem.com*", requestStage = "Request" },
+                new { urlPattern = "*unagi*.amazon.com*", requestStage = "Request" },
+                new { urlPattern = "*aan.amazon.com*", requestStage = "Request" },
+                new { urlPattern = "*fls-*.amazon.com*", requestStage = "Request" },
+                new { urlPattern = "*mads*.amazon.com*", requestStage = "Request" },
+                new { urlPattern = "*device-metrics*.amazon.com*", requestStage = "Request" },
+                new { urlPattern = "*doubleclick.net*", requestStage = "Request" },
+                new { urlPattern = "*googlesyndication.com*", requestStage = "Request" },
+                new { urlPattern = "*googleadservices.com*", requestStage = "Request" },
+                new { urlPattern = "*google-analytics.com*", requestStage = "Request" },
+                new { urlPattern = "*googletagmanager.com*", requestStage = "Request" },
+                new { urlPattern = "*fwmrm.net*", requestStage = "Request" },
+                new { urlPattern = "*flashtalking.com*", requestStage = "Request" },
+                new { urlPattern = "*innovid.com*", requestStage = "Request" },
+                new { urlPattern = "*scorecardresearch.com*", requestStage = "Request" },
+                new { urlPattern = "*moatads.com*", requestStage = "Request" },
+                new { urlPattern = "*serving-sys.com*", requestStage = "Request" },
+                new { urlPattern = "*adsrvr.org*", requestStage = "Request" },
+                new { urlPattern = "*adnxs.com*", requestStage = "Request" },
+                new { urlPattern = "*rubiconproject.com*", requestStage = "Request" },
+                new { urlPattern = "*pubmatic.com*", requestStage = "Request" },
+                new { urlPattern = "*openx.net*", requestStage = "Request" },
+                new { urlPattern = "*casalemedia.com*", requestStage = "Request" },
+                new { urlPattern = "*advertising.com*", requestStage = "Request" },
+                new { urlPattern = "*spotxchange.com*", requestStage = "Request" },
+                new { urlPattern = "*spotx.tv*", requestStage = "Request" },
+                new { urlPattern = "*springserve.com*", requestStage = "Request" },
+                new { urlPattern = "*tremorhub.com*", requestStage = "Request" },
+                new { urlPattern = "*yieldmo.com*", requestStage = "Request" },
+                new { urlPattern = "*tapad.com*", requestStage = "Request" },
+                new { urlPattern = "*/vast/*", requestStage = "Request" },
+                new { urlPattern = "*/vpaid/*", requestStage = "Request" },
+                new { urlPattern = "*/vast.xml*", requestStage = "Request" },
+                new { urlPattern = "*/VAST*", requestStage = "Request" },
+                new { urlPattern = "*/ad-manifest*", requestStage = "Request" },
+                new { urlPattern = "*/interstitial*", requestStage = "Request" },
+                new { urlPattern = "*a2z.com/telemetry*", requestStage = "Request" },
+                new { urlPattern = "*a2z.com/gp/uedata*", requestStage = "Request" },
+                new { urlPattern = "*amazon-adsystem.com/aax2/*", requestStage = "Request" },
+                new { urlPattern = "*amazon-adsystem.com/e/dtb/*", requestStage = "Request" },
+                new { urlPattern = "*csm/csa*", requestStage = "Request" }
             }
         }
     });
-    var blockedUrlsBytes = Encoding.UTF8.GetBytes(blockedUrlsPayload);
-    await socket.SendAsync(blockedUrlsBytes, WebSocketMessageType.Text, true, cts.Token);
+    await socket.SendAsync(Encoding.UTF8.GetBytes(fetchEnablePayload), WebSocketMessageType.Text, true, cts.Token);
 
-    const string fastCheckExpression = "(window.__primeVideoSpeedControl?.installed ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
+    // --- Script injection (check if already installed with correct version) ---
+    const string fastCheckExpression = "(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '3.0.0' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
     var checkPayload = JsonSerializer.Serialize(new
     {
         id = 1,
@@ -257,10 +302,10 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
         }
     });
 
-    var checkBytes = Encoding.UTF8.GetBytes(checkPayload);
-    await socket.SendAsync(checkBytes, WebSocketMessageType.Text, true, cts.Token);
+    await socket.SendAsync(Encoding.UTF8.GetBytes(checkPayload), WebSocketMessageType.Text, true, cts.Token);
 
-    var buffer = new byte[8192];
+    var buffer = new byte[16384];
+    bool alreadyInstalled = false;
     for (int i = 0; i < 10; i++)
     {
         var result = await socket.ReceiveAsync(buffer, cts.Token);
@@ -269,42 +314,190 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
             var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
             if (responseText.Contains("\"id\":1", StringComparison.OrdinalIgnoreCase) || responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
             {
-                if (responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
+                alreadyInstalled = responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase);
                 break;
             }
         }
         if (cts.Token.IsCancellationRequested) break;
     }
 
-    var fullPayload = JsonSerializer.Serialize(new
+    if (!alreadyInstalled)
     {
-        id = 2,
-        method = "Runtime.evaluate",
-        @params = new
+        var fullPayload = JsonSerializer.Serialize(new
         {
-            expression = script,
-            awaitPromise = false,
-            returnByValue = true
-        }
-    });
-
-    var fullBytes = Encoding.UTF8.GetBytes(fullPayload);
-    await socket.SendAsync(fullBytes, WebSocketMessageType.Text, true, cts.Token);
-    for (int i = 0; i < 10; i++)
-    {
-        var result = await socket.ReceiveAsync(buffer, cts.Token);
-        if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
-        {
-            var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            if (responseText.Contains("\"id\":2", StringComparison.OrdinalIgnoreCase))
+            id = 2,
+            method = "Runtime.evaluate",
+            @params = new
             {
-                break;
+                expression = script,
+                awaitPromise = false,
+                returnByValue = true
+            }
+        });
+
+        await socket.SendAsync(Encoding.UTF8.GetBytes(fullPayload), WebSocketMessageType.Text, true, cts.Token);
+        for (int i = 0; i < 10; i++)
+        {
+            var result = await socket.ReceiveAsync(buffer, cts.Token);
+            if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
+            {
+                var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                if (responseText.Contains("\"id\":2", StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+            }
+            if (cts.Token.IsCancellationRequested) break;
+        }
+    }
+
+    // --- Start persistent Fetch interceptor if not already active for this target ---
+    if (!AdBlocker.ActiveInterceptors.Contains(webSocketDebuggerUrl))
+    {
+        AdBlocker.ActiveInterceptors.Add(webSocketDebuggerUrl);
+        _ = Task.Run(() => RunFetchInterceptorLoop(webSocketDebuggerUrl));
+    }
+}
+
+static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
+{
+    try
+    {
+        using var socket = new ClientWebSocket();
+        using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), connectCts.Token);
+
+        // Re-enable Fetch on this persistent connection
+        var fetchEnablePayload = JsonSerializer.Serialize(new
+        {
+            id = 100,
+            method = "Fetch.enable",
+            @params = new
+            {
+                patterns = new object[]
+                {
+                    new { urlPattern = "*", requestStage = "Request" }
+                }
+            }
+        });
+        await socket.SendAsync(Encoding.UTF8.GetBytes(fetchEnablePayload), WebSocketMessageType.Text, true, CancellationToken.None);
+
+        var buffer = new byte[32768];
+        while (socket.State == WebSocketState.Open)
+        {
+            WebSocketReceiveResult result;
+            try
+            {
+                using var recvCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                result = await socket.ReceiveAsync(buffer, recvCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Send a ping to check connection is alive
+                try
+                {
+                    var pingPayload = JsonSerializer.Serialize(new
+                    {
+                        id = 999,
+                        method = "Runtime.evaluate",
+                        @params = new { expression = "1", returnByValue = true }
+                    });
+                    await socket.SendAsync(Encoding.UTF8.GetBytes(pingPayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                    continue;
+                }
+                catch
+                {
+                    break;
+                }
+            }
+
+            if (result.MessageType == WebSocketMessageType.Close) break;
+            if (result.MessageType != WebSocketMessageType.Text || result.Count == 0) continue;
+
+            var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
+
+            // Handle Fetch.requestPaused events
+            if (responseText.Contains("\"Fetch.requestPaused\"", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(responseText);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("params", out var paramsEl) &&
+                        paramsEl.TryGetProperty("requestId", out var requestIdEl))
+                    {
+                        var requestId = requestIdEl.GetString();
+                        var requestUrl = "";
+                        if (paramsEl.TryGetProperty("request", out var requestEl) &&
+                            requestEl.TryGetProperty("url", out var urlEl))
+                        {
+                            requestUrl = urlEl.GetString() ?? "";
+                        }
+
+                        if (AdBlocker.IsAdRequest(requestUrl))
+                        {
+                            // Check if it's a VAST/VPAID request — return empty VAST XML
+                            if (requestUrl.Contains("/vast", StringComparison.OrdinalIgnoreCase) ||
+                                requestUrl.Contains("/vpaid", StringComparison.OrdinalIgnoreCase) ||
+                                requestUrl.Contains("vast.xml", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var emptyVast = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VAST version=\"3.0\"/>";
+                                var emptyVastBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(emptyVast));
+                                var fulfillPayload = JsonSerializer.Serialize(new
+                                {
+                                    id = 200,
+                                    method = "Fetch.fulfillRequest",
+                                    @params = new
+                                    {
+                                        requestId = requestId,
+                                        responseCode = 200,
+                                        responseHeaders = new[]
+                                        {
+                                            new { name = "Content-Type", value = "application/xml" },
+                                            new { name = "Access-Control-Allow-Origin", value = "*" }
+                                        },
+                                        body = emptyVastBase64
+                                    }
+                                });
+                                await socket.SendAsync(Encoding.UTF8.GetBytes(fulfillPayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                            else
+                            {
+                                // Block the ad request entirely
+                                var failPayload = JsonSerializer.Serialize(new
+                                {
+                                    id = 201,
+                                    method = "Fetch.failRequest",
+                                    @params = new
+                                    {
+                                        requestId = requestId,
+                                        errorReason = "BlockedByClient"
+                                    }
+                                });
+                                await socket.SendAsync(Encoding.UTF8.GetBytes(failPayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                        }
+                        else
+                        {
+                            // Allow non-ad requests to continue
+                            var continuePayload = JsonSerializer.Serialize(new
+                            {
+                                id = 202,
+                                method = "Fetch.continueRequest",
+                                @params = new { requestId = requestId }
+                            });
+                            await socket.SendAsync(Encoding.UTF8.GetBytes(continuePayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                        }
+                    }
+                }
+                catch { }
             }
         }
-        if (cts.Token.IsCancellationRequested) break;
+    }
+    catch { }
+    finally
+    {
+        AdBlocker.ActiveInterceptors.Remove(webSocketDebuggerUrl);
     }
 }
 
@@ -314,6 +507,114 @@ static JsonSerializerOptions JsonOptions()
     {
         PropertyNameCaseInsensitive = true
     };
+}
+
+internal static class AdBlocker
+{
+    public static readonly string[] Patterns = new[]
+    {
+        "*amazon-adsystem.com*",
+        "*unagi.amazon.com*",
+        "*unagi-na.amazon.com*",
+        "*aax-us-east.amazon-adsystem.com*",
+        "*aax-us-iad.amazon-adsystem.com*",
+        "*aax-eu.amazon-adsystem.com*",
+        "*aax-fe.amazon-adsystem.com*",
+        "*aan.amazon.com*",
+        "*aan.amazon.co*",
+        "*fls-na.amazon.com*",
+        "*fls-eu.amazon.com*",
+        "*fls-fe.amazon.com*",
+        "*device-metrics-us.amazon.com*",
+        "*device-metrics-us-2.amazon.com*",
+        "*mads-eu.amazon.com*",
+        "*mads.amazon.com*",
+        "*m.media-amazon.com/images/G/01/csm/*",
+        "*a2z.com/telemetry*",
+        "*a2z.com/gp/uedata*",
+        "*completion.amazon.com/api/2017/suggestions*",
+        "*/vast/*",
+        "*/vpaid/*",
+        "*/vast.xml*",
+        "*/VAST*",
+        "*/ad-manifest*",
+        "*/interstitial*",
+        "*doubleclick.net*",
+        "*googlesyndication.com*",
+        "*googleadservices.com*",
+        "*google-analytics.com*",
+        "*googletagmanager.com*",
+        "*googletagservices.com*",
+        "*fwmrm.net*",
+        "*flashtalking.com*",
+        "*innovid.com*",
+        "*scorecardresearch.com*",
+        "*moatads.com*",
+        "*serving-sys.com*",
+        "*adsrvr.org*",
+        "*adnxs.com*",
+        "*rubiconproject.com*",
+        "*pubmatic.com*",
+        "*openx.net*",
+        "*casalemedia.com*",
+        "*advertising.com*",
+        "*tapad.com*",
+        "*spotxchange.com*",
+        "*spotx.tv*",
+        "*springserve.com*",
+        "*tremorhub.com*",
+        "*yieldmo.com*",
+        "*amazon-adsystem.com/aax2/amzn_ads.js*",
+        "*amazon-adsystem.com/e/dtb/*"
+    };
+
+    static readonly HashSet<string> Domains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "amazon-adsystem.com", "unagi.amazon.com", "unagi-na.amazon.com",
+        "aan.amazon.com", "mads.amazon.com", "mads-eu.amazon.com",
+        "device-metrics-us.amazon.com", "device-metrics-us-2.amazon.com",
+        "fls-na.amazon.com", "fls-eu.amazon.com", "fls-fe.amazon.com",
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+        "google-analytics.com", "googletagmanager.com", "googletagservices.com",
+        "fwmrm.net", "flashtalking.com", "innovid.com",
+        "scorecardresearch.com", "moatads.com", "serving-sys.com",
+        "adsrvr.org", "adnxs.com", "rubiconproject.com",
+        "pubmatic.com", "openx.net", "casalemedia.com",
+        "advertising.com", "tapad.com", "spotxchange.com",
+        "spotx.tv", "springserve.com", "tremorhub.com", "yieldmo.com"
+    };
+
+    static readonly string[] PathPatterns = new[]
+    {
+        "/vast/", "/vpaid/", "/vast.xml", "/VAST", "/ad-manifest", "/interstitial",
+        "/aax2/", "/e/dtb/", "/telemetry", "/gp/uedata", "/csm/"
+    };
+
+    public static readonly HashSet<string> ActiveInterceptors = new();
+
+    public static bool IsAdRequest(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return false;
+        try
+        {
+            var uri = new Uri(url);
+            var host = uri.Host;
+            foreach (var domain in Domains)
+            {
+                if (host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+                    host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            var pathAndQuery = uri.PathAndQuery;
+            foreach (var pattern in PathPatterns)
+            {
+                if (pathAndQuery.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
 }
 
 internal static class AppIconHelper

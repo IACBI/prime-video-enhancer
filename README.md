@@ -21,17 +21,18 @@ It is built for viewers who want a seamless, commercial-free streaming experienc
 
 Prime Video Speed & Subtitle Controller launches Prime Video in an Edge app-style window and adds a sleek floating button when a real video player is detected. The control stays out of the way, can be dragged to a preferred position, and remembers both your selected playback speed and custom subtitle color preferences locally.
 
-In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 4-Layer Zero-Visibility Ad Shield** that blocks ad trackers at the network level (`Network.setBlockedURLs`) and blackouts unskippable stitched ad segments with `16x` hyper-speed and automatic muting, ensuring you never see or hear commercials (`Zero-Visibility`). Normal user playback speed customization ranges smoothly from `0.25x` to `4.0x`.
+In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 5-Layer Zero-Visibility Ad Shield** that blocks ads at the network request level using Chromium's CDP Fetch interception (similar to uBlock Origin), blocks tracking URLs, and freezes the frame during unskippable stitched ad segments with `16x` silent speed, ensuring you never see or hear commercials (`Zero-Visibility`). Normal user playback speed customization ranges smoothly from `0.25x` to `4.0x`.
 
 ### Features
 
 - Opens Prime Video in a dedicated Microsoft Edge app window (`--remote-debugging-address=127.0.0.1`).
 - Shows the speed & subtitle control (`1.2x ●` / `1.2x ⚡`) only when video playback is available.
-- **Always-On 4-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
-  - **Layer 1 (Network Ad & Tracker Blocker):** Blocks Amazon ad servers (`amazon-adsystem.com`), telemetry, and tracking networks right at the Chromium network layer (`Network.setBlockedURLs`).
-  - **Layer 2 (CSS Banner & Countdown Destroyer):** Permanently removes "Ad 1 of 2", ad countdown banners, and ad overlays (`display: none !important`).
-  - **Layer 3 (Blackout Curtain & Auto-Mute):** During unskippable SSAI ad breaks, instantly mutes the commercial audio (`video.muted = true`) and hides video frames behind a dark `⚡ Reklam Atlanıyor...` blackout curtain (`opacity: 0`). You never see or hear commercial content.
-  - **Layer 4 (Auto-Skip Clicker & 16x Hyper-Speed):** Automatically clicks "Skip Ad" the millisecond it appears, or accelerates unskippable ads at `16x` speed (`video.playbackRate = 16`) to finish them in seconds before restoring normal playback (`1.2x`).
+- **Always-On 5-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
+  - **Layer 1 (CDP Fetch Interception - uBlock Origin Style):** Uses Chromium's `Fetch.enable` and `Fetch.requestPaused` protocol domains to block ads at the request stage before any bytes are loaded. Returns custom empty VAST/VPAID response XMLs for stitched player-level ads.
+  - **Layer 2 (Network-Level Blocker):** Blocks Amazon ad servers (`amazon-adsystem.com`), telemetry, and tracking networks right at the Chromium network layer (`Network.setBlockedURLs`).
+  - **Layer 3 (CSS Banner & Countdown Destroyer):** Permanently removes "Ad 1 of 2", ad countdown banners, and ad overlays (`opacity: 0 !important`).
+  - **Layer 4 (Freeze-Frame Video Overlay & Auto-Mute):** During unskippable stitched ad breaks, instantly mutes commercial audio (`video.muted = true`) and captures/overlays the last valid video frame using a temporary `<canvas>` freeze-frame, completely hiding the ad video stream without annoying dark blackout screens or text.
+  - **Layer 5 (Auto-Skip Clicker & 16x Hyper-Speed):** Automatically clicks "Skip Ad" the millisecond it appears, or accelerates unskippable ads at `16x` speed (`video.playbackRate = 16`) to finish them in seconds before restoring normal playback (`1.2x`).
 - **Smart Auto-Hide During Playback:** Exactly 2 seconds after video playback begins (`play`/`playing`) or the mouse stops moving, the floating button smoothly fades out (`opacity: 0`) for an ultra-clean viewing experience matching native Prime Video controls. Reappears instantly on mouse movement or pause.
 - **Compact Icon Indicator:** Displays your current speed and a clean indicator icon:
   - **`1.2x ●`** when custom subtitle styling is ON (the dot glows in your selected subtitle color).
@@ -121,17 +122,18 @@ Released under the MIT License. See [LICENSE](LICENSE).
 
 Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde özel bir uygulama penceresinde açan ve ekranda gerçek bir video oynatıcı algılandığında zarif, kaydırılabilir bir buton gösteren açık kaynaklı ve hafif bir Windows aracıdır. Bu kontrol butonu izleme keyfinizi bölmez, ekranda dilediğiniz konuma taşınabilir ve seçtiğiniz oynatma hızı ile altyazı rengi tercihlerinizi yerel olarak hatırlar.
 
-Çok katmanlı altyazı sabitleyicisine (varsayılan olarak **Sarı `#FFCC00`**) ek olarak, projemizde entegre bir **4 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam takipliklerini doğrudan ağ seviyesinde (`Network.setBlockedURLs`) engellerken, atlanamayan zorunlu reklam aralarını ise `16x` hiper hız ve otomatik sessize alma mekanizmasıyla siyah perde arkasında saniyeler içinde eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
+Çok katmanlı altyazı sabitleyicisine (varsayılan olarak **Sarı `#FFCC00`**) ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü (uBlock Origin tarzı) aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamlar sırasında son kareyi dondurarak (`canvas` tabanlı freeze-frame) 16x hiper sessiz hızda reklamları eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
 
 ### Özellikler
 
 - Prime Video'yu özel ve yerel bir Microsoft Edge penceresinde açar (`--remote-debugging-address=127.0.0.1`).
 - Hız ve altyazı butonunu (`1.2x ●` / `1.2x ⚡`) sadece video oynatımı hazır olduğunda gösterir.
-- **4 Katmanlı Sıfır Görünürlük Reklam Kalkanı (`🛡️ Reklam Kalkanı`):**
-  - **Katman 1 (Ağ Reklam ve Takipçi Engelleyici):** Amazon reklam sunucularını (`amazon-adsystem.com`), telemetri ve takip ağlarını doğrudan Chromium ağ katmanında engeller (`Network.setBlockedURLs`).
-  - **Katman 2 (CSS Banner ve Geri Sayım Yok Edici):** "Reklam 1/2" uyarılarını, reklam sayacı banner'larını ve katmanlarını tamamen gizler (`display: none !important`).
-  - **Katman 3 (Siyah Perde ve Otomatik Sessize Alma):** Atlanamayan zorunlu SSAI reklam aralarında ses otomatik kesilir (`video.muted = true`) ve görüntü karanlık bir `⚡ Reklam Atlanıyor...` perdesi (`opacity: 0`) arkasına gizlenir. Hiçbir reklam sesi duyulmaz veya görüntüsü görülmez.
-  - **Katman 4 (Otomatik Skip ve 16x Hiper Hız):** "Reklamı Atla / Skip Ad" butonu çıktığı milisaniye otomatik tıklanır. Atlanamayan reklamlarda ise video `16x` hiper hıza (`video.playbackRate = 16`) alınarak birkaç saniyede aşılır ve asıl içerik normal hızda (`1.2x`) pürüzsüzce geri gelir.
+- **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (`🛡️ Reklam Kalkanı`):**
+  - **Katman 1 (CDP Fetch İstek Kesicisi - uBlock Origin Tarzı):** Chromium'un `Fetch.enable` ve `Fetch.requestPaused` protokol etki alanlarını kullanarak, reklam dosyalarının byte'ları daha yüklenmeye başlamadan istek aşamasında bloke eder. Oynatıcı düzeyinde gömülü reklamlar için boş VAST/VPAID XML yanıtı döner.
+  - **Katman 2 (Ağ Reklam ve Takipçi Engelleyici):** Amazon reklam sunucularını (`amazon-adsystem.com`), telemetri ve takip ağlarını doğrudan Chromium ağ katmanında engeller (`Network.setBlockedURLs`).
+  - **Katman 3 (CSS Banner ve Geri Sayım Yok Edici):** "Reklam 1/2" uyarılarını, reklam sayacı banner'larını ve katmanlarını tamamen görünmez yapar (`opacity: 0 !important`).
+  - **Katman 4 (Dondurulmuş Görüntü ve Otomatik Sessize Alma):** Atlanamayan zorunlu gömülü reklam aralarında ses otomatik kesilir (`video.muted = true`) ve video üzerine anlık yakalanan son geçerli video karesi (`canvas` dondurma perdesi) yerleştirilir. Siyah ekran veya yazılar görünmeden reklam gizlenir.
+  - **Katman 5 (Otomatik Skip ve 16x Hiper Hız):** "Reklamı Atla / Skip Ad" butonu çıktığı milisaniye otomatik tıklanır. Atlanamayan reklamlarda ise video `16x` hiper hıza (`video.playbackRate = 16`) alınarak birkaç saniyede aşılır ve asıl içerik normal hızda (`1.2x`) pürüzsüzce geri gelir.
 - **Akıllı Otomatik Gizleme (Auto-Hide):** Video oynatımı başladıktan tam 2 saniye sonra veya fare hareketsiz kaldığında, buton yumuşak bir animasyonla ekrandan kaybolur (`opacity: 0`) ve tertemiz sinematik bir ekran sunar. Fare hareketinde anında görünür hale gelir.
 - **Kompakt Durum İkonu:** Mevcut hızı ve aktif modu simgeyle gösterir:
   - **`1.2x ●`** altyazı renklendirmesi AÇIK olduğunda (nokta seçilen altyazı renginde parlar).
