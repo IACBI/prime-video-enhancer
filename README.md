@@ -1,6 +1,6 @@
 # Prime Video Speed & Subtitle Controller
 
-**Prime Video Speed & Subtitle Controller** is an open-source, lightweight Windows helper that opens Prime Video in a dedicated Microsoft Edge app window, adding a clean playback speed control (`1.2x ●` / `1.2x ⚡`), an automatic subtitle color stabilizer, and an always-on **4-Layer Zero-Visibility Ad Shield** (`🛡️ Reklam Kalkanı`).
+**Prime Video Speed & Subtitle Controller** is an open-source, lightweight Windows helper that opens Prime Video in a dedicated Microsoft Edge app window, adding a clean playback speed control (`1.2x ●` / `1.2x ⚡`), an automatic subtitle color stabilizer, and an always-on **5-Layer Zero-Visibility Ad Shield** (`🛡️ Reklam Kalkanı`).
 
 It is built for viewers who want a seamless, commercial-free streaming experience with simple speed selection and consistent yellow subtitles without modifying the official Prime Video app, bypassing DRM, downloading video, or installing a browser extension.
 
@@ -21,7 +21,7 @@ It is built for viewers who want a seamless, commercial-free streaming experienc
 
 Prime Video Speed & Subtitle Controller launches Prime Video in an Edge app-style window and adds a sleek floating button when a real video player is detected. The control stays out of the way, can be dragged to a preferred position, and remembers both your selected playback speed and custom subtitle color preferences locally.
 
-In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 5-Layer Zero-Visibility Ad Shield** that blocks ads at the network request level using Chromium's CDP Fetch interception (similar to uBlock Origin), blocks tracking URLs, and freezes the frame during unskippable stitched ad segments with `16x` silent speed, ensuring you never see or hear commercials (`Zero-Visibility`). Normal user playback speed customization ranges smoothly from `0.25x` to `4.0x`.
+In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 5-Layer Zero-Visibility Ad Shield** that blocks ads at the network request level using Chromium's CDP Fetch interception (similar to uBlock Origin), blocks tracking URLs, and covers unskippable stitched ad segments with an opaque overlay while silently fast-forwarding them at `16x`, ensuring you never see or hear commercials (`Zero-Visibility`). Normal user playback speed customization ranges smoothly from `0.25x` to `4.0x`.
 
 ### Features
 
@@ -31,7 +31,7 @@ In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC
   - **Layer 1 (CDP Fetch Interception - uBlock Origin Style):** Uses Chromium's `Fetch.enable` and `Fetch.requestPaused` protocol domains to block ads at the request stage before any bytes are loaded. Returns custom empty VAST/VPAID response XMLs for stitched player-level ads.
   - **Layer 2 (Network-Level Blocker):** Blocks Amazon ad servers (`amazon-adsystem.com`), telemetry, and tracking networks right at the Chromium network layer (`Network.setBlockedURLs`).
   - **Layer 3 (CSS Banner & Countdown Destroyer):** Permanently removes "Ad 1 of 2", ad countdown banners, and ad overlays (`opacity: 0 !important`).
-  - **Layer 4 (Freeze-Frame Video Overlay & Auto-Mute):** During unskippable stitched ad breaks, instantly mutes commercial audio (`video.muted = true`) and captures/overlays the last valid video frame using a temporary `<canvas>` freeze-frame, completely hiding the ad video stream without annoying dark blackout screens or text.
+  - **Layer 4 (Opaque Ad Cover & Auto-Mute):** During unskippable stitched ad breaks, instantly mutes commercial audio (`video.muted = true`) and hides the ad stream behind an opaque cover overlay. (A `<canvas>` freeze-frame is deliberately NOT used: Prime Video's stream is DRM-protected, so capturing a frame throws a `SecurityError` in every browser.) The shield only engages when a real ad countdown (e.g. `0:27`) is visible, and a 45-second safety valve with a cooldown guarantees a stuck or false detection can never lock normal playback behind the cover.
   - **Layer 5 (Auto-Skip Clicker & 16x Hyper-Speed):** Automatically clicks "Skip Ad" the millisecond it appears, or accelerates unskippable ads at `16x` speed (`video.playbackRate = 16`) to finish them in seconds before restoring normal playback (`1.2x`).
 - **Smart Auto-Hide During Playback:** Exactly 2 seconds after video playback begins (`play`/`playing`) or the mouse stops moving, the floating button smoothly fades out (`opacity: 0`) for an ultra-clean viewing experience matching native Prime Video controls. Reappears instantly on mouse movement or pause.
 - **Compact Icon Indicator:** Displays your current speed and a clean indicator icon:
@@ -122,7 +122,7 @@ Released under the MIT License. See [LICENSE](LICENSE).
 
 Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde özel bir uygulama penceresinde açan ve ekranda gerçek bir video oynatıcı algılandığında zarif, kaydırılabilir bir buton gösteren açık kaynaklı ve hafif bir Windows aracıdır. Bu kontrol butonu izleme keyfinizi bölmez, ekranda dilediğiniz konuma taşınabilir ve seçtiğiniz oynatma hızı ile altyazı rengi tercihlerinizi yerel olarak hatırlar.
 
-Çok katmanlı altyazı sabitleyicisine (varsayılan olarak **Sarı `#FFCC00`**) ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü (uBlock Origin tarzı) aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamlar sırasında son kareyi dondurarak (`canvas` tabanlı freeze-frame) 16x hiper sessiz hızda reklamları eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
+Çok katmanlı altyazı sabitleyicisine (varsayılan olarak **Sarı `#FFCC00`**) ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü (uBlock Origin tarzı) aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamları opak bir perde arkasında 16x hiper sessiz hızda eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
 
 ### Özellikler
 
@@ -132,7 +132,7 @@ Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde
   - **Katman 1 (CDP Fetch İstek Kesicisi - uBlock Origin Tarzı):** Chromium'un `Fetch.enable` ve `Fetch.requestPaused` protokol etki alanlarını kullanarak, reklam dosyalarının byte'ları daha yüklenmeye başlamadan istek aşamasında bloke eder. Oynatıcı düzeyinde gömülü reklamlar için boş VAST/VPAID XML yanıtı döner.
   - **Katman 2 (Ağ Reklam ve Takipçi Engelleyici):** Amazon reklam sunucularını (`amazon-adsystem.com`), telemetri ve takip ağlarını doğrudan Chromium ağ katmanında engeller (`Network.setBlockedURLs`).
   - **Katman 3 (CSS Banner ve Geri Sayım Yok Edici):** "Reklam 1/2" uyarılarını, reklam sayacı banner'larını ve katmanlarını tamamen görünmez yapar (`opacity: 0 !important`).
-  - **Katman 4 (Dondurulmuş Görüntü ve Otomatik Sessize Alma):** Atlanamayan zorunlu gömülü reklam aralarında ses otomatik kesilir (`video.muted = true`) ve video üzerine anlık yakalanan son geçerli video karesi (`canvas` dondurma perdesi) yerleştirilir. Siyah ekran veya yazılar görünmeden reklam gizlenir.
+  - **Katman 4 (Opak Reklam Perdesi ve Otomatik Sessize Alma):** Atlanamayan zorunlu gömülü reklam aralarında ses otomatik kesilir (`video.muted = true`) ve reklam akışı opak bir perde ile gizlenir. (`canvas` tabanlı kare dondurma bilinçli olarak kullanılmaz: Prime Video akışı DRM korumalıdır ve kare yakalamak her tarayıcıda `SecurityError` fırlatır.) Kalkan yalnızca gerçek bir reklam geri sayımı (örn. `0:27`) görünürken devreye girer; 45 saniyelik emniyet valfi ve sonrasındaki bekleme süresi, takılı veya hatalı bir algılamanın normal izlemeyi asla perde arkasına kilitleyememesini garanti eder.
   - **Katman 5 (Otomatik Skip ve 16x Hiper Hız):** "Reklamı Atla / Skip Ad" butonu çıktığı milisaniye otomatik tıklanır. Atlanamayan reklamlarda ise video `16x` hiper hıza (`video.playbackRate = 16`) alınarak birkaç saniyede aşılır ve asıl içerik normal hızda (`1.2x`) pürüzsüzce geri gelir.
 - **Akıllı Otomatik Gizleme (Auto-Hide):** Video oynatımı başladıktan tam 2 saniye sonra veya fare hareketsiz kaldığında, buton yumuşak bir animasyonla ekrandan kaybolur (`opacity: 0`) ve tertemiz sinematik bir ekran sunar. Fare hareketinde anında görünür hale gelir.
 - **Kompakt Durum İkonu:** Mevcut hızı ve aktif modu simgeyle gösterir:
@@ -223,17 +223,18 @@ MIT Lisansı altında yayınlanmıştır. Ayrıntılar için [LICENSE](LICENSE) 
 
 Prime Video Speed & Subtitle Controller es una herramienta ligera y de código abierto para Windows que abre Prime Video en una ventana dedicada de Microsoft Edge y añade un botón flotante cuando se detecta el reproductor de vídeo. Este control no molesta, se puede arrastrar a cualquier parte de la pantalla y recuerda localmente tu velocidad de reproducción seleccionada y tus colores de subtítulos preferidos.
 
-Además de la estabilización multicapa de los subtítulos (por defecto en **Amarillo `#FFCC00`**), este proyecto incluye un **Escudo de Anuncios de 4 Capas (Zero-Visibility Ad Shield)** que bloquea servidores de publicidad a nivel de red (`Network.setBlockedURLs`) y silencia las pausas publicitarias obligatorias avanzando a velocidad ultrarrápida `16x` tras una cortina negra (`Zero-Visibility`). La personalización normal de la velocidad de reproducción para el usuario va fluidamente desde `0.25x` hasta `4.0x`.
+Además de la estabilización multicapa de los subtítulos (por defecto en **Amarillo `#FFCC00`**), este proyecto incluye un **Escudo de Anuncios de 5 Capas (Zero-Visibility Ad Shield)** que bloquea servidores de publicidad a nivel de red (`Network.setBlockedURLs`) y silencia las pausas publicitarias obligatorias avanzando a velocidad ultrarrápida `16x` tras una cortina negra (`Zero-Visibility`). La personalización normal de la velocidad de reproducción para el usuario va fluidamente desde `0.25x` hasta `4.0x`.
 
 ### Funciones
 
 - Abre Prime Video en una ventana dedicada de Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Muestra el control flotante (`1.2x ●` / `1.2x ⚡`) únicamente durante la reproducción de vídeo.
-- **Escudo de Anuncios de 4 Capas (`🛡️ Reklam Kalkanı`):**
-  - **Capa 1 (Bloqueo de Red y Rastreadores):** Bloquea servidores de publicidad de Amazon (`amazon-adsystem.com`), telemetría y rastreadores en la capa de red de Chromium (`Network.setBlockedURLs`).
-  - **Capa 2 (Destrucción de Banners y Contadores CSS):** Oculta permanentemente avisos de "Anuncio 1 de 2", banners temporizadores y superposiciones molestas (`display: none !important`).
-  - **Capa 3 (Cortina Negra y Silencio Automático):** Durante los anuncios obligatorios SSAI, silencia el audio (`video.muted = true`) y cubre el vídeo con una cortina oscura `⚡ Reklam Atlanıyor...` (`opacity: 0`). Nunca ves ni escuchas anuncios.
-  - **Capa 4 (Salto Automático y Velocidad 16x):** Hace clic automáticamente en "Omitir anuncio" en el milisegundo en que aparece, o acelera los anuncios obligatorios a velocidad `16x` (`video.playbackRate = 16`) para consumirlos en segundos antes de restaurar tu velocidad normal (`1.2x`).
+- **Escudo de Anuncios de 5 Capas (`🛡️ Reklam Kalkanı`):**
+  - **Capa 1 (Intercepción CDP Fetch - estilo uBlock Origin):** Usa los dominios de protocolo `Fetch.enable` y `Fetch.requestPaused` de Chromium para bloquear los anuncios en la fase de solicitud, antes de que se cargue un solo byte. Devuelve respuestas XML VAST/VPAID vacías para los anuncios integrados a nivel de reproductor.
+  - **Capa 2 (Bloqueo de Red y Rastreadores):** Bloquea servidores de publicidad de Amazon (`amazon-adsystem.com`), telemetría y rastreadores en la capa de red de Chromium (`Network.setBlockedURLs`).
+  - **Capa 3 (Destrucción de Banners y Contadores CSS):** Oculta permanentemente avisos de "Anuncio 1 de 2", banners temporizadores y superposiciones molestas (`display: none !important`).
+  - **Capa 4 (Cortina Negra y Silencio Automático):** Durante los anuncios obligatorios SSAI, silencia el audio (`video.muted = true`) y cubre el vídeo con una cortina oscura `⚡ Reklam Atlanıyor...` (`opacity: 0`). Nunca ves ni escuchas anuncios.
+  - **Capa 5 (Salto Automático y Velocidad 16x):** Hace clic automáticamente en "Omitir anuncio" en el milisegundo en que aparece, o acelera los anuncios obligatorios a velocidad `16x` (`video.playbackRate = 16`) para consumirlos en segundos antes de restaurar tu velocidad normal (`1.2x`).
 - **Ocultación Automática Inteligente:** Exactamente 2 segundos después de iniciar la reproducción (`play`/`playing`) o de que el ratón deje de moverse, el botón flotante se desvanece suavemente (`opacity: 0`) para dejar la pantalla completamente limpia. Vuelve a aparecer de inmediato si mueves el ratón.
 - **Indicador Compacto de Estado:** Muestra tu velocidad actual junto con un icono distintivo:
   - **`1.2x ●`** cuando el color personalizado de subtítulos está ACTIVADO (el punto brilla con el color elegido).
@@ -322,17 +323,18 @@ Publicado bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más
 
 Prime Video Speed & Subtitle Controller ist ein leichtgewichtiges Open-Source-Hilfsprogramm für Windows, das Prime Video in einem dedizierten Microsoft-Edge-Appfenster startet und einen eleganten, verschiebbaren Button einblendet, sobald ein Videoplayer erkannt wird. Die Steuerung bleibt unaufdringlich, lässt sich frei auf dem Bildschirm platzieren und speichert Ihre bevorzugte Wiedergabegeschwindigkeit sowie Untertitelfarb-Einstellungen lokal ab.
 
-Zusätzlich zur mehrstufigen Untertitel-Stabilisierung (Standardmäßig **Gelb `#FFCC00`**) bietet dieses Projekt einen **4-stufigen Werbeschutz (Zero-Visibility Ad Shield)**, der Werbe-Tracker auf Netzwerkebene (`Network.setBlockedURLs`) blockiert und nicht überspringbare Werbeunterbrechungen mit `16x` Hyper-Geschwindigkeit und automatischer Stummschaltung hinter einem schwarzen Vorhang (`Zero-Visibility`) verschwinden lässt. Die reguläre Wiedergabegeschwindigkeit für den Benutzer lässt sich flexibel zwischen `0.25x` und `4.0x` anpassen.
+Zusätzlich zur mehrstufigen Untertitel-Stabilisierung (Standardmäßig **Gelb `#FFCC00`**) bietet dieses Projekt einen **5-stufigen Werbeschutz (Zero-Visibility Ad Shield)**, der Werbe-Tracker auf Netzwerkebene (`Network.setBlockedURLs`) blockiert und nicht überspringbare Werbeunterbrechungen mit `16x` Hyper-Geschwindigkeit und automatischer Stummschaltung hinter einem schwarzen Vorhang (`Zero-Visibility`) verschwinden lässt. Die reguläre Wiedergabegeschwindigkeit für den Benutzer lässt sich flexibel zwischen `0.25x` und `4.0x` anpassen.
 
 ### Funktionen
 
 - Öffnet Prime Video in einem dedizierten Microsoft-Edge-Fenster (`--remote-debugging-address=127.0.0.1`).
 - Zeigt den Geschwindigkeits- & Untertitelbutton (`1.2x ●` / `1.2x ⚡`) nur während der Videowiedergabe an.
-- **4-stufiger Werbeschutz (`🛡️ Reklam Kalkanı`):**
-  - **Stufe 1 (Netzwerk- & Tracker-Blocker):** Blockiert Amazon-Werbeserver (`amazon-adsystem.com`), Telemetrie und Tracking-Netzwerke direkt auf der Chromium-Netzwerkebene (`Network.setBlockedURLs`).
-  - **Stufe 2 (CSS-Banner & Countdown-Zerstörer):** Entfernt „Werbung 1 von 2“-Hinweise, Countdown-Banner und Werbe-Overlays dauerhaft (`display: none !important`).
-  - **Stufe 3 (Blackout Vorhang & Auto-Stummschaltung):** Schaltet den Ton während unüberspringbarer SSAI-Werbeunterbrechungen sofort stumm (`video.muted = true`) und verbirgt das Bild hinter einem dunklen `⚡ Reklam Atlanıyor...` Vorhang (`opacity: 0`). Sie sehen oder hören keinerlei Werbung.
-  - **Stufe 4 (Auto-Skip Klicker & 16x Hyper-Geschwindigkeit):** Klickt in der ersten Millisekunde automatisch auf „Werbung überspringen“ oder beschleunigt unüberspringbare Werbung mit `16x` Geschwindigkeit (`video.playbackRate = 16`), um sie in Sekunden zu beenden, bevor die normale Wiedergabe (`1.2x`) reibungslos fortgesetzt wird.
+- **5-stufiger Werbeschutz (`🛡️ Reklam Kalkanı`):**
+  - **Stufe 1 (CDP-Fetch-Abfangen – uBlock-Origin-Stil):** Nutzt die Chromium-Protokolldomänen `Fetch.enable` und `Fetch.requestPaused`, um Werbung bereits in der Anfragephase zu blockieren, bevor ein einziges Byte geladen wird. Liefert leere VAST/VPAID-XML-Antworten für eingebettete Player-Werbung.
+  - **Stufe 2 (Netzwerk- & Tracker-Blocker):** Blockiert Amazon-Werbeserver (`amazon-adsystem.com`), Telemetrie und Tracking-Netzwerke direkt auf der Chromium-Netzwerkebene (`Network.setBlockedURLs`).
+  - **Stufe 3 (CSS-Banner & Countdown-Zerstörer):** Entfernt „Werbung 1 von 2“-Hinweise, Countdown-Banner und Werbe-Overlays dauerhaft (`display: none !important`).
+  - **Stufe 4 (Blackout Vorhang & Auto-Stummschaltung):** Schaltet den Ton während unüberspringbarer SSAI-Werbeunterbrechungen sofort stumm (`video.muted = true`) und verbirgt das Bild hinter einem dunklen `⚡ Reklam Atlanıyor...` Vorhang (`opacity: 0`). Sie sehen oder hören keinerlei Werbung.
+  - **Stufe 5 (Auto-Skip Klicker & 16x Hyper-Geschwindigkeit):** Klickt in der ersten Millisekunde automatisch auf „Werbung überspringen“ oder beschleunigt unüberspringbare Werbung mit `16x` Geschwindigkeit (`video.playbackRate = 16`), um sie in Sekunden zu beenden, bevor die normale Wiedergabe (`1.2x`) reibungslos fortgesetzt wird.
 - **Intelligentes Auto-Hide während der Wiedergabe:** Genau 2 Sekunden nach Start des Videos (`play`/`playing`) oder bei Stillstand des Mauszeigers blendet sich der schwebende Button sanft aus (`opacity: 0`), um eine makellose Bildfläche zu garantieren. Erscheint bei Mausbewegung sofort wieder.
 - **Kompakte Statusanzeige:** Zeigt Ihre aktuelle Geschwindigkeit und ein klares Modus-Symbol:
   - **`1.2x ●`** wenn die Untertitelfarb-Anpassung AKTIV ist (der Punkt leuchtet in der gewählten Farbe).
@@ -421,17 +423,18 @@ Veröffentlicht unter der MIT-Lizenz. Weitere Informationen finden Sie unter [LI
 
 Prime Video Speed & Subtitle Controller est un utilitaire léger et open-source pour Windows qui lance Prime Video dans une fenêtre Microsoft Edge dédiée et affiche un bouton flottant élégant lorsqu'un lecteur vidéo est détecté. Ce contrôle reste discret, peut être glissé à n'importe quel endroit de l'écran et mémorise localement votre vitesse de lecture ainsi que vos couleurs de sous-titres personnalisées.
 
-En plus d'une stabilisation multicouche des sous-titres (par défaut en **Jaune `#FFCC00`**), ce projet intègre un **Bouclier Anti-Pub à 4 Niveaux (Zero-Visibility Ad Shield)** qui bloque les serveurs publicitaires sur le réseau (`Network.setBlockedURLs`) et coupe le son des publicités obligatoires en les accélérant à vitesse `16x` derrière un rideau noir (`Zero-Visibility`). La personnalisation normale de la vitesse de lecture par l'utilisateur s'étend de `0.25x` à `4.0x`.
+En plus d'une stabilisation multicouche des sous-titres (par défaut en **Jaune `#FFCC00`**), ce projet intègre un **Bouclier Anti-Pub à 5 Niveaux (Zero-Visibility Ad Shield)** qui bloque les serveurs publicitaires sur le réseau (`Network.setBlockedURLs`) et coupe le son des publicités obligatoires en les accélérant à vitesse `16x` derrière un rideau noir (`Zero-Visibility`). La personnalisation normale de la vitesse de lecture par l'utilisateur s'étend de `0.25x` à `4.0x`.
 
 ### Fonctionnalités
 
 - Ouvre Prime Video dans une fenêtre Microsoft Edge dédiée (`--remote-debugging-address=127.0.0.1`).
 - Affiche le bouton de contrôle (`1.2x ●` / `1.2x ⚡`) uniquement lorsque la vidéo est en cours de lecture.
-- **Bouclier Anti-Pub à 4 Niveaux (`🛡️ Reklam Kalkanı`):**
-  - **Niveau 1 (Blocage Réseau et Traqueurs):** Bloque les serveurs publicitaires d'Amazon (`amazon-adsystem.com`), la télémétrie et les traqueurs directement au niveau réseau Chromium (`Network.setBlockedURLs`).
-  - **Niveau 2 (Suppression des Bannières et Comptes à Rebours):** Masque définitivement les indications "Annonce 1 sur 2", les bannières de compte à rebours et les superpositions CSS (`display: none !important`).
-  - **Niveau 3 (Rideau Noir et Silencieux Automatique):** Pendant les publicités obligatoires SSAI, coupe instantanément le son (`video.muted = true`) et masque la vidéo derrière un rideau noir `⚡ Reklam Atlanıyor...` (`opacity: 0`). Vous ne voyez ni n'entendez aucune publicité.
-  - **Niveau 4 (Clic de Saut et Vitesse 16x):** Clique automatiquement sur "Passer l'annonce" dès sa première milliseconde, ou accélère les publicités obligatoires à vitesse `16x` (`video.playbackRate = 16`) pour les terminer en quelques secondes avant de restaurer votre vitesse normale (`1.2x`).
+- **Bouclier Anti-Pub à 5 Niveaux (`🛡️ Reklam Kalkanı`):**
+  - **Niveau 1 (Interception CDP Fetch - style uBlock Origin):** Utilise les domaines de protocole `Fetch.enable` et `Fetch.requestPaused` de Chromium pour bloquer les publicités dès la phase de requête, avant le chargement du moindre octet. Renvoie des réponses XML VAST/VPAID vides pour les publicités intégrées au lecteur.
+  - **Niveau 2 (Blocage Réseau et Traqueurs):** Bloque les serveurs publicitaires d'Amazon (`amazon-adsystem.com`), la télémétrie et les traqueurs directement au niveau réseau Chromium (`Network.setBlockedURLs`).
+  - **Niveau 3 (Suppression des Bannières et Comptes à Rebours):** Masque définitivement les indications "Annonce 1 sur 2", les bannières de compte à rebours et les superpositions CSS (`display: none !important`).
+  - **Niveau 4 (Rideau Noir et Silencieux Automatique):** Pendant les publicités obligatoires SSAI, coupe instantanément le son (`video.muted = true`) et masque la vidéo derrière un rideau noir `⚡ Reklam Atlanıyor...` (`opacity: 0`). Vous ne voyez ni n'entendez aucune publicité.
+  - **Niveau 5 (Clic de Saut et Vitesse 16x):** Clique automatiquement sur "Passer l'annonce" dès sa première milliseconde, ou accélère les publicités obligatoires à vitesse `16x` (`video.playbackRate = 16`) pour les terminer en quelques secondes avant de restaurer votre vitesse normale (`1.2x`).
 - **Masquage Automatique Intelligent (Auto-Hide):** Exactement 2 secondes après le début de la vidéo (`play`/`playing`) ou l'arrêt du mouvement de la souris, le bouton flottant disparaît en douceur (`opacity: 0`) pour un écran de visionnage pur et sans encombre. Réapparaît instantanément au mouvement de la souris.
 - **Indicateur Compact d'État:** Affiche la vitesse actuelle et un icône de mode propre:
   - **`1.2x ●`** lorsque la personnalisation des sous-titres est ACTIVE (le point brille dans votre couleur).
@@ -520,17 +523,18 @@ Publié sous licence MIT. Consultez le fichier [LICENSE](LICENSE) pour plus d'in
 
 Prime Video Speed & Subtitle Controller é uma ferramenta leve e de código aberto para Windows que abre o Prime Video em uma janela dedicada do Microsoft Edge e exibe um botão flutuante elegante assim que o reprodutor de vídeo é detectado. Esse controle não atrapalha, pode ser arrastado livremente pela tela e armazena localmente suas preferências de velocidade de reprodução e cores de legendas personalizadas.
 
-Além da estabilização multicamada das legendas (padrão **Amarelo `#FFCC00`**), este projeto possui um **Escudo de 4 Camadas de Zero Visibilidade (Zero-Visibility Ad Shield)**, que bloqueia servidores de anúncios na rede (`Network.setBlockedURLs`) e silencia intervalos comerciais obrigatórios, acelerando-os em velocidade `16x` atrás de uma cortina preta (`Zero-Visibility`). A personalização normal da velocidade para o usuário vai de `0.25x` a `4.0x`.
+Além da estabilização multicamada das legendas (padrão **Amarelo `#FFCC00`**), este projeto possui um **Escudo de 5 Camadas de Zero Visibilidade (Zero-Visibility Ad Shield)**, que bloqueia servidores de anúncios na rede (`Network.setBlockedURLs`) e silencia intervalos comerciais obrigatórios, acelerando-os em velocidade `16x` atrás de uma cortina preta (`Zero-Visibility`). A personalização normal da velocidade para o usuário vai de `0.25x` a `4.0x`.
 
 ### Recursos
 
 - Abre o Prime Video em uma janela dedicada do Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Exibe o controle flutuante (`1.2x ●` / `1.2x ⚡`) exclusivamente durante a reprodução de vídeo.
-- **Escudo de 4 Camadas de Zero Visibilidade (`🛡️ Reklam Kalkanı`):**
-  - **Camada 1 (Bloqueador de Rede e Rastreadores):** Bloqueia servidores de anúncios da Amazon (`amazon-adsystem.com`), telemetria e rastreamento diretamente na camada de rede Chromium (`Network.setBlockedURLs`).
-  - **Camada 2 (Destruidor de Banners e Contadores CSS):** Oculta permanentemente avisos de "Anúncio 1 de 2", banners contadores e sobreposições indesejadas (`display: none !important`).
-  - **Camada 3 (Cortina Preta e Silenciamento Automático):** Durante anúncios obrigatórios SSAI, silencia o áudio instantaneamente (`video.muted = true`) e cobre o vídeo com uma cortina escura `⚡ Reklam Atlanıyor...` (`opacity: 0`). Você não vê nem ouve comerciais.
-  - **Camada 4 (Pular Automático e Velocidade 16x):** Clica no botão "Pular Anúncio" no milissegundo em que aparece ou acelera anúncios obrigatórios a velocidade `16x` (`video.playbackRate = 16`) para finalizá-los em segundos, restaurando sua velocidade normal (`1.2x`).
+- **Escudo de 5 Camadas de Zero Visibilidade (`🛡️ Reklam Kalkanı`):**
+  - **Camada 1 (Interceptação CDP Fetch - estilo uBlock Origin):** Usa os domínios de protocolo `Fetch.enable` e `Fetch.requestPaused` do Chromium para bloquear anúncios na fase de requisição, antes de qualquer byte ser carregado. Retorna respostas XML VAST/VPAID vazias para anúncios embutidos no player.
+  - **Camada 2 (Bloqueador de Rede e Rastreadores):** Bloqueia servidores de anúncios da Amazon (`amazon-adsystem.com`), telemetria e rastreamento diretamente na camada de rede Chromium (`Network.setBlockedURLs`).
+  - **Camada 3 (Destruidor de Banners e Contadores CSS):** Oculta permanentemente avisos de "Anúncio 1 de 2", banners contadores e sobreposições indesejadas (`display: none !important`).
+  - **Camada 4 (Cortina Preta e Silenciamento Automático):** Durante anúncios obrigatórios SSAI, silencia o áudio instantaneamente (`video.muted = true`) e cobre o vídeo com uma cortina escura `⚡ Reklam Atlanıyor...` (`opacity: 0`). Você não vê nem ouve comerciais.
+  - **Camada 5 (Pular Automático e Velocidade 16x):** Clica no botão "Pular Anúncio" no milissegundo em que aparece ou acelera anúncios obrigatórios a velocidade `16x` (`video.playbackRate = 16`) para finalizá-los em segundos, restaurando sua velocidade normal (`1.2x`).
 - **Ocultação Automática Inteligente:** Exatamente 2 segundos após o início do vídeo (`play`/`playing`) ou quando o mouse para de se mover, o botão flutuante desaparece suavemente (`opacity: 0`) para uma tela limpa e cinematográfica. Reaparece na hora ao mover o mouse.
 - **Indicador Compacto de Status:** Mostra a velocidade atual junto com um ícone nítido:
   - **`1.2x ●`** quando a personalização de legenda está ATIVA (o ponto brilha na cor escolhida).
@@ -619,17 +623,18 @@ Distribuído sob a Licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais det
 
 Prime Video Speed & Subtitle Controller 是一个开源、轻量级的 Windows 辅助工具。它在 Microsoft Edge 的独立应用窗口中打开 Prime Video，并在检测到视频播放器时添加一个优雅的悬浮控制按钮 (`1.2x ●` / `1.2x ⚡`)。该控制按钮界面精简，可自由拖拽放置在屏幕任何位置，并能本地保存您的倍速选择与自定义字幕颜色偏好。
 
-除了多层字幕颜色固定功能（默认锁定为**黄色 `#FFCC00`**）外，本项目还内置了**4层零可见广告屏蔽盾 (Zero-Visibility Ad Shield)**。它不仅能在底层网络拦截广告跟踪器 (`Network.setBlockedURLs`)，更能在不可跳过的广告片断播放时自动开启黑屏静音，并以 `16x` 极速快进消除广告 (`Zero-Visibility`)。用户的常规视频播放倍速调整范围为 `0.25x` 至 `4.0x`。
+除了多层字幕颜色固定功能（默认锁定为**黄色 `#FFCC00`**）外，本项目还内置了**5层零可见广告屏蔽盾 (Zero-Visibility Ad Shield)**。它不仅能在底层网络拦截广告跟踪器 (`Network.setBlockedURLs`)，更能在不可跳过的广告片断播放时自动开启黑屏静音，并以 `16x` 极速快进消除广告 (`Zero-Visibility`)。用户的常规视频播放倍速调整范围为 `0.25x` 至 `4.0x`。
 
 ### 功能特性
 
 - 在专用的 Microsoft Edge 独立窗口 (`--remote-debugging-address=127.0.0.1`) 中打开 Prime Video。
 - 仅在视频播放器准备就绪时显示悬浮按钮 (`1.2x ●` / `1.2x ⚡`)。
-- **4层零可见广告屏蔽盾 (`🛡️ Reklam Kalkanı`):**
-  - **第 1 层 (网络广告与跟踪拦截):** 在 Chromium 底层网络协议层拦截 Amazon 广告服务器 (`amazon-adsystem.com`)、遥测数据及追踪请求 (`Network.setBlockedURLs`)。
-  - **第 2 层 (CSS 广告横幅消灭):** 永久隐藏“广告 1/2”倒计时提示、顶部广告横幅及干扰弹窗 (`display: none !important`)。
-  - **第 3 层 (黑屏静音幕布):** 遇到不可跳过的强制广告 (SSAI) 时，瞬间将音频静音 (`video.muted = true`) 并将视频画面隐藏在漆黑的 `⚡ Reklam Atlanıyor...` 幕布之下 (`opacity: 0`)。您看不见也听不到任何商业广告。
-  - **第 4 层 (秒跳与 16 倍速极速消化):** 检测到“跳过广告”按键出现的毫秒内自动点击。若遇到无法点击的广告，则将视频播放速度瞬间加速至 `16x` (`video.playbackRate = 16`)，在两秒内消化完毕，随后平滑恢复至您设定的正常倍速 (`1.2x`)。
+- **5层零可见广告屏蔽盾 (`🛡️ Reklam Kalkanı`):**
+  - **第 1 层 (CDP Fetch 请求拦截 - uBlock Origin 风格):** 利用 Chromium 的 `Fetch.enable` 与 `Fetch.requestPaused` 协议域，在请求阶段拦截广告，任何字节尚未加载即被阻断；并为播放器级拼接广告返回空的 VAST/VPAID XML 响应。
+  - **第 2 层 (网络广告与跟踪拦截):** 在 Chromium 底层网络协议层拦截 Amazon 广告服务器 (`amazon-adsystem.com`)、遥测数据及追踪请求 (`Network.setBlockedURLs`)。
+  - **第 3 层 (CSS 广告横幅消灭):** 永久隐藏“广告 1/2”倒计时提示、顶部广告横幅及干扰弹窗 (`display: none !important`)。
+  - **第 4 层 (黑屏静音幕布):** 遇到不可跳过的强制广告 (SSAI) 时，瞬间将音频静音 (`video.muted = true`) 并将视频画面隐藏在漆黑的 `⚡ Reklam Atlanıyor...` 幕布之下 (`opacity: 0`)。您看不见也听不到任何商业广告。
+  - **第 5 层 (秒跳与 16 倍速极速消化):** 检测到“跳过广告”按键出现的毫秒内自动点击。若遇到无法点击的广告，则将视频播放速度瞬间加速至 `16x` (`video.playbackRate = 16`)，在两秒内消化完毕，随后平滑恢复至您设定的正常倍速 (`1.2x`)。
 - **播放时智能隐藏 (Auto-Hide):** 在视频开始播放 (`play`/`playing`) 或鼠标停止移动后的精确 2 秒后，悬浮按钮会以平滑动画自动隐藏 (`opacity: 0`)，带来媲美原生的纯净观影体验。鼠标移过时瞬间重新出现。
 - **紧凑型状态指示器:** 清晰显示当前倍速与运作模式：
   - **`1.2x ●`**：当自定义字幕显色开启时（圆点会以您选择的字幕颜色发光）。
@@ -718,17 +723,18 @@ dotnet run -c Release
 
 Prime Video Speed & Subtitle Controller विंडोज़ के लिए एक ओपन-सोर्स और हल्का टूल है जो Prime Video को एक समर्पित Microsoft Edge ऐप विंडो में खोलता है और वीडियो प्लेबैक का पता चलने पर स्क्रीन पर एक आकर्षक, ड्रैग करने योग्य फ्लोटिंग बटन (`1.2x ●` / `1.2x ⚡`) दिखाता है। यह नियंत्रण बटन आपके देखने में कोई बाधा नहीं डालता, स्क्रीन पर कहीं भी ले जाया जा सकता है और आपके चुने हुए प्लेबैक स्पीड और सबटाइटल रंग को स्थानीय रूप से सुरक्षित रखता है।
 
-सबटाइटल के पीले रंग (**Yellow `#FFCC00`**) को हर एपिसोड में लॉक करने के अलावा, इस प्रोजेक्ट में **4-Layer Zero-Visibility Ad Shield** शामिल है। यह नेटवर्क स्तर पर विज्ञापन ट्रैकर्स को रोकता है (`Network.setBlockedURLs`) और अनिवार्य विज्ञापनों को काली स्क्रीन (`Zero-Visibility`) के पीछे स्वतः म्यूट करके `16x` की तेज़ गति से सेकंडों में समाप्त कर देता है। सामान्य देखने की गति को आप `0.25x` से `4.0x` तक आसानी से बदल सकते हैं।
+सबटाइटल के पीले रंग (**Yellow `#FFCC00`**) को हर एपिसोड में लॉक करने के अलावा, इस प्रोजेक्ट में **5-Layer Zero-Visibility Ad Shield** शामिल है। यह नेटवर्क स्तर पर विज्ञापन ट्रैकर्स को रोकता है (`Network.setBlockedURLs`) और अनिवार्य विज्ञापनों को काली स्क्रीन (`Zero-Visibility`) के पीछे स्वतः म्यूट करके `16x` की तेज़ गति से सेकंडों में समाप्त कर देता है। सामान्य देखने की गति को आप `0.25x` से `4.0x` तक आसानी से बदल सकते हैं।
 
 ### सुविधाएँ
 
 - Prime Video को समर्पित Microsoft Edge विंडो (`--remote-debugging-address=127.0.0.1`) में खोलता है।
 - स्पीड और सबटाइटल बटन (`1.2x ●` / `1.2x ⚡`) को केवल वीडियो चलने पर दिखाता है।
-- **4-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
-  - **लेयर 1 (नेटवर्क विज्ञापन और ट्रैकर ब्लॉकर):** Amazon के विज्ञापन सर्वर (`amazon-adsystem.com`), टेलीमेट्री और ट्रैकिंग नेटवर्क को सीधे Chromium नेटवर्क स्तर पर ब्लॉक करता है (`Network.setBlockedURLs`)।
-  - **लेयर 2 (CSS बैनर और काउंटडाउन रिमूवर):** "Ad 1 of 2" संदेश, विज्ञापन समय बैनर और ओवरले को हमेशा के लिए छुपाता है (`display: none !important`)।
-  - **เลयर 3 (काली स्क्रीन और ऑटो-म्यूट):** अनिवार्य SSAI विज्ञापनों के दौरान तुरंत आवाज़ बंद करता है (`video.muted = true`) और वीडियो को काली `⚡ Reklam Atlanıyor...` स्क्रीन (`opacity: 0`) के पीछे छुपा देता है। आप न तो विज्ञापन देखते हैं और न ही सुनते हैं।
-  - **लेयर 4 (ऑटो-स्किप और 16x हाइपर-स्पीड):** "Skip Ad" बटन आते ही मिलीसेकंड में स्वतः क्लिक करता है। यदि विज्ञापन स्किप न हो सके, तो वीडियो को `16x` की तेज़ गति (`video.playbackRate = 16`) से चलाकर कुछ ही सेकंड में समाप्त कर देता है और फिर आपकी सामान्य गति (`1.2x`) पर वापस आ जाता है।
+- **5-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
+  - **लेयर 1 (CDP Fetch इंटरसेप्शन - uBlock Origin शैली):** Chromium के `Fetch.enable` और `Fetch.requestPaused` प्रोटोकॉल डोमेन का उपयोग करके विज्ञापनों को अनुरोध चरण में ही रोक देता है, इससे पहले कि एक भी बाइट लोड हो। प्लेयर-स्तर के विज्ञापनों के लिए खाली VAST/VPAID XML उत्तर लौटाता है।
+  - **लेयर 2 (नेटवर्क विज्ञापन और ट्रैकर ब्लॉकर):** Amazon के विज्ञापन सर्वर (`amazon-adsystem.com`), टेलीमेट्री और ट्रैकिंग नेटवर्क को सीधे Chromium नेटवर्क स्तर पर ब्लॉक करता है (`Network.setBlockedURLs`)।
+  - **लेयर 3 (CSS बैनर और काउंटडाउन रिमूवर):** "Ad 1 of 2" संदेश, विज्ञापन समय बैनर और ओवरले को हमेशा के लिए छुपाता है (`display: none !important`)।
+  - **लेयर 4 (काली स्क्रीन और ऑटो-म्यूट):** अनिवार्य SSAI विज्ञापनों के दौरान तुरंत आवाज़ बंद करता है (`video.muted = true`) और वीडियो को काली `⚡ Reklam Atlanıyor...` स्क्रीन (`opacity: 0`) के पीछे छुपा देता है। आप न तो विज्ञापन देखते हैं और न ही सुनते हैं।
+  - **लेयर 5 (ऑटो-स्किप और 16x हाइपर-स्पीड):** "Skip Ad" बटन आते ही मिलीसेकंड में स्वतः क्लिक करता है। यदि विज्ञापन स्किप न हो सके, तो वीडियो को `16x` की तेज़ गति (`video.playbackRate = 16`) से चलाकर कुछ ही सेकंड में समाप्त कर देता है और फिर आपकी सामान्य गति (`1.2x`) पर वापस आ जाता है।
 - **स्मार्ट ऑटो-हाइड:** वीडियो शुरू होने के 2 सेकंड बाद या माउस रुकने पर फ्लोटिंग बटन अपने आप गायब हो जाता है (`opacity: 0`) ताकि स्क्रीन बिल्कुल साफ रहे। माउस हिलाते ही यह तुरंत फिर से दिखाई देता है।
 - **कॉम्पैक्ट स्टेटस इंडिकेटर:** आपकी वर्तमान गति और मोड दिखाता है:
   - **`1.2x ●`** जब सबटाइटल कलर ऑन होता है (बिंदु आपके चुने हुए रंग में चमकता है)।
@@ -817,17 +823,18 @@ MIT लाइसेंस के अंतर्गत जारी किया
 
 Prime Video Speed & Subtitle Controller هو أداة مفتوحة المصدر وخفيفة لنظام Windows تفتح Prime Video داخل نافذة Microsoft Edge مخصصة، وتضيف زر عائم أنيق (`1.2x ●` / `1.2x ⚡`) عند اكتشاف مشغل الفيديو. لا يعيق هذا التحكم مشاهدتك، ويمكن سحبه ووضعه في أي مكان على الشاشة، ويحفظ إعداداتك المفضلة لسرعة التشغيل وألوان الترجمة محلياً.
 
-بالإضافة إلى تثبيت لون الترجمة بعدة طبقات (الافتراضي هو **الأصفر `#FFCC00`**)، يشتمل هذا المشروع على **درع إعلانات مخفي من 4 طبقات (Zero-Visibility Ad Shield)** يقوم بحجب خوادم الإعلانات على مستوى الشبكة (`Network.setBlockedURLs`) ويكتم صوت الإعلانات الإجبارية ويسرعها إلى `16x` خلف شاشة سوداء (`Zero-Visibility`). يمكن للمستخدم تخصيص سرعة المشاهدة العادية بسلاسة بين `0.25x` و `4.0x`.
+بالإضافة إلى تثبيت لون الترجمة بعدة طبقات (الافتراضي هو **الأصفر `#FFCC00`**)، يشتمل هذا المشروع على **درع إعلانات مخفي من 5 طبقات (Zero-Visibility Ad Shield)** يقوم بحجب خوادم الإعلانات على مستوى الشبكة (`Network.setBlockedURLs`) ويكتم صوت الإعلانات الإجبارية ويسرعها إلى `16x` خلف شاشة سوداء (`Zero-Visibility`). يمكن للمستخدم تخصيص سرعة المشاهدة العادية بسلاسة بين `0.25x` و `4.0x`.
 
 ### الميزات
 
 - يفتح Prime Video في نافذة Microsoft Edge مخصصة ومحمية (`--remote-debugging-address=127.0.0.1`).
 - يظهر زر التحكم (`1.2x ●` / `1.2x ⚡`) فقط أثناء تشغيل الفيديو.
-- **درع إعلانات مخفي من 4 طبقات (`🛡️ Reklam Kalkanı`):**
-  - **الطبقة 1 (حجب خوادم الإعلانات والتتبع شبكياً):** يحجب خوادم إعلانات Amazon (`amazon-adsystem.com`) وشبكات القياس عن بعد مباشرة في طبقة شبكة Chromium (`Network.setBlockedURLs`).
-  - **الطبقة 2 (إزالة لافتات الإعلانات والعد التنازلي):** يخفي نهائياً رسائل "Ad 1 of 2" ولافتات العد التنازلي للإعلانات (`display: none !important`).
-  - **الطبقة 3 (الستارة السوداء والكتم التلقائي للصوت):** أثناء فواصل الإعلانات الإجبارية SSAI، يكتم الصوت تلقائياً (`video.muted = true`) ويغطي الفيديو بستارة سوداء `⚡ Reklam Atlanıyor...` (`opacity: 0`). لا ترى أو تسمع أي محتوى إعلاني.
-  - **الطبقة 4 (النقر التلقائي لزر التخطي والتسريع 16x):** ينقر تلقائياً على زر "تخطي الإعلان" فور ظهوره. وإذا كان الإعلان غير قابل للتخطي، يسرع الفيديو إلى `16x` (`video.playbackRate = 16`) لإنهائه في ثوانٍ ثم يعيد السرعة الطبيعية (`1.2x`).
+- **درع إعلانات مخفي من 5 طبقات (`🛡️ Reklam Kalkanı`):**
+  - **الطبقة 1 (اعتراض CDP Fetch - بأسلوب uBlock Origin):** يستخدم نطاقات بروتوكول Chromium `Fetch.enable` و`Fetch.requestPaused` لحجب الإعلانات في مرحلة الطلب قبل تحميل أي بايت، ويعيد استجابات XML فارغة بصيغة VAST/VPAID للإعلانات المدمجة في المشغل.
+  - **الطبقة 2 (حجب خوادم الإعلانات والتتبع شبكياً):** يحجب خوادم إعلانات Amazon (`amazon-adsystem.com`) وشبكات القياس عن بعد مباشرة في طبقة شبكة Chromium (`Network.setBlockedURLs`).
+  - **الطبقة 3 (إزالة لافتات الإعلانات والعد التنازلي):** يخفي نهائياً رسائل "Ad 1 of 2" ولافتات العد التنازلي للإعلانات (`display: none !important`).
+  - **الطبقة 4 (الستارة السوداء والكتم التلقائي للصوت):** أثناء فواصل الإعلانات الإجبارية SSAI، يكتم الصوت تلقائياً (`video.muted = true`) ويغطي الفيديو بستارة سوداء `⚡ Reklam Atlanıyor...` (`opacity: 0`). لا ترى أو تسمع أي محتوى إعلاني.
+  - **الطبقة 5 (النقر التلقائي لزر التخطي والتسريع 16x):** ينقر تلقائياً على زر "تخطي الإعلان" فور ظهوره. وإذا كان الإعلان غير قابل للتخطي، يسرع الفيديو إلى `16x` (`video.playbackRate = 16`) لإنهائه في ثوانٍ ثم يعيد السرعة الطبيعية (`1.2x`).
 - **الإخفاء التلقائي الذكي أثناء المشاهدة:** بعد ثانيتين بالتمام من بدء الفيديو (`play`/`playing`) أو توقف حركة الماوس، يختفي الزر العائم بسلاسة (`opacity: 0`) للحصول على شاشة نظيفة وسينمائية. يعود للظهور فور تحريك الماوس.
 - **مؤشر حالة مدمج:** يعرض السرعة الحالية وأيقونة الوضع:
   - **`1.2x ●`** عندما يكون تخصيص الترجمة مفعّلاً (تضيء النقطة بلون الترجمة المختار).
@@ -916,17 +923,18 @@ dotnet run -c Release
 
 Prime Video Speed & Subtitle Controller — это открытая легкая утилита для Windows, которая запускает Prime Video в отдельном приложении-окне Microsoft Edge и добавляет стильную плавающую кнопку управления (`1.2x ●` / `1.2x ⚡`), когда обнаруживается видеоплеер. Кнопка не перекрывает контент, легко перетаскивается в любое удобное место экрана и сохраняет ваши предпочтения скорости воспроизведения и цвета субтитров локально.
 
-В дополнение к многослойному стабилизатору субтитров (по умолчанию **Желтый `#FFCC00`**), проект включает **4-уровневый рекламный щит нулевой видимости (Zero-Visibility Ad Shield)**. Он блокирует рекламные трекеры на сетевом уровне (`Network.setBlockedURLs`), а при показе обязательной рекламы автоматически отключает звук и ускоряет ее в `16x` раз за черным экраном (`Zero-Visibility`). Пользовательская скорость просмотра видео плавно настраивается от `0.25x` до `4.0x`.
+В дополнение к многослойному стабилизатору субтитров (по умолчанию **Желтый `#FFCC00`**), проект включает **5-уровневый рекламный щит нулевой видимости (Zero-Visibility Ad Shield)**. Он блокирует рекламные трекеры на сетевом уровне (`Network.setBlockedURLs`), а при показе обязательной рекламы автоматически отключает звук и ускоряет ее в `16x` раз за черным экраном (`Zero-Visibility`). Пользовательская скорость просмотра видео плавно настраивается от `0.25x` до `4.0x`.
 
 ### Возможности
 
 - Открывает Prime Video в отдельном окне Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Показывает кнопку управления (`1.2x ●` / `1.2x ⚡`) исключительно во время воспроизведения видео.
-- **4-уровневый рекламный щит нулевой видимости (`🛡️ Reklam Kalkanı`):**
-  - **Уровень 1 (Сетевая блокировка рекламы и трекеров):** Блокирует рекламные серверы Amazon (`amazon-adsystem.com`), телеметрию и трекинговые домены прямо на сетевом уровне Chromium (`Network.setBlockedURLs`).
-  - **Уровень 2 (Удаление баннеров и счетчиков):** Полностью скрывает надписи "Реклама 1 из 2", таймеры и рекламные оверлеи (`display: none !important`).
-  - **Уровень 3 (Черный экран и авто-мьют):** Во время неотключаемых вставок SSAI мгновенно выключает звук (`video.muted = true`) и закрывает видео темным экраном `⚡ Reklam Atlanıyor...` (`opacity: 0`). Вы не видите и не слышите рекламу.
-  - **Уровень 4 (Авто-клик Skip и скорость 16x):** Автоматически нажимает "Пропустить рекламу" в первую миллисекунду появления. Если реклама не пропускается, ускоряет видео до `16x` (`video.playbackRate = 16`), завершая вставку за пару секунд перед возвратом к обычной скорости (`1.2x`).
+- **5-уровневый рекламный щит нулевой видимости (`🛡️ Reklam Kalkanı`):**
+  - **Уровень 1 (Перехват CDP Fetch — в стиле uBlock Origin):** Использует протокольные домены Chromium `Fetch.enable` и `Fetch.requestPaused`, чтобы блокировать рекламу на стадии запроса, до загрузки первого байта. Возвращает пустые XML-ответы VAST/VPAID для встроенной рекламы на уровне плеера.
+  - **Уровень 2 (Сетевая блокировка рекламы и трекеров):** Блокирует рекламные серверы Amazon (`amazon-adsystem.com`), телеметрию и трекинговые домены прямо на сетевом уровне Chromium (`Network.setBlockedURLs`).
+  - **Уровень 3 (Удаление баннеров и счетчиков):** Полностью скрывает надписи "Реклама 1 из 2", таймеры и рекламные оверлеи (`display: none !important`).
+  - **Уровень 4 (Черный экран и авто-мьют):** Во время неотключаемых вставок SSAI мгновенно выключает звук (`video.muted = true`) и закрывает видео темным экраном `⚡ Reklam Atlanıyor...` (`opacity: 0`). Вы не видите и не слышите рекламу.
+  - **Уровень 5 (Авто-клик Skip и скорость 16x):** Автоматически нажимает "Пропустить рекламу" в первую миллисекунду появления. Если реклама не пропускается, ускоряет видео до `16x` (`video.playbackRate = 16`), завершая вставку за пару секунд перед возвратом к обычной скорости (`1.2x`).
 - **Умное автоскрытие при просмотре:** Ровно через 2 секунды после начала видео (`play`/`playing`) или остановки мыши плавающая кнопка плавно исчезает (`opacity: 0`) для чистого кинематографического обзора. Мгновенно появляется при движении мыши.
 - **Компактный индикатор статуса:** Отображает текущую скорость и иконку режима:
   - **`1.2x ●`**, если цвет субтитров ВКЛЮЧЕН (точка светится выбранным вами цветом).
@@ -1015,17 +1023,18 @@ dotnet run -c Release
 
 Prime Video Speed & Subtitle Controller は、Windows 向けのオープンソースで軽量なアシスタントツールです。Prime Video を Microsoft Edge の専用アプリウィンドウで起動し、動画プレイヤーが検出された際に、洗練されたドラッグ可能な操作ボタン (`1.2x ●` / `1.2x ⚡`) を画面に表示します。このボタンは視聴の妨げにならず、画面内の好きな場所に移動でき、選択した再生速度や字幕カラーの設定をローカルに記憶します。
 
-字幕を黄色 (**Yellow `#FFCC00`**) に保つ多層安定化機能に加えて、当プロジェクトには**4レイヤー広告遮断シールド (Zero-Visibility Ad Shield)**が搭載されています。ネットワーク層での広告サーバーブロック (`Network.setBlockedURLs`) に加え、スキップ不可の広告枠では自動消音とブラックアウト画面の裏で `16倍速` 高速消化 (`Zero-Visibility`) を実行します。通常の動画再生におけるユーザーの速度調整範囲は `0.25x` から `4.0x` です。
+字幕を黄色 (**Yellow `#FFCC00`**) に保つ多層安定化機能に加えて、当プロジェクトには**5レイヤー広告遮断シールド (Zero-Visibility Ad Shield)**が搭載されています。ネットワーク層での広告サーバーブロック (`Network.setBlockedURLs`) に加え、スキップ不可の広告枠では自動消音とブラックアウト画面の裏で `16倍速` 高速消化 (`Zero-Visibility`) を実行します。通常の動画再生におけるユーザーの速度調整範囲は `0.25x` から `4.0x` です。
 
 ### 機能
 
 - 専用の Microsoft Edge アプリウィンドウ (`--remote-debugging-address=127.0.0.1`) で Prime Video を開きます。
 - 再生速度および字幕ボタン (`1.2x ●` / `1.2x ⚡`) を動画再生中のみ表示します。
-- **4レイヤー広告遮断シールド (`🛡️ Reklam Kalkanı`):**
-  - **レイヤー 1 (ネットワーク広告＆トラッカー遮断):** Chromium ネットワーク層にて Amazon 広告サーバー (`amazon-adsystem.com`)、テレメトリー、追跡ドメインを直接ブロックします (`Network.setBlockedURLs`)。
-  - **レイヤー 2 (CSS バナー＆カウントダウン削除):** 「広告 1/2」表示、カウントダウンバナー、画面オーバーレイを完全に非表示化します (`display: none !important`)。
-  - **レイヤー 3 (ブラックアウトカーテン＆自動ミュート):** スキップ不可の強制広告 (SSAI) 時に音声を即座に消音 (`video.muted = true`) し、映像を暗転した `⚡ Reklam Atlanıyor...` カーテン (`opacity: 0`) で覆い隠します。広告の音声も映像も一切流れません。
-  - **レイヤー 4 (自動スキップ＆16倍速超高速消化):** 「広告をスキップ」ボタンが出現した瞬間に自動クリック。スキップ不可広告の場合は再生速度を `16倍速` (`video.playbackRate = 16`) に引き上げ数秒で終了させ、本来の動画速度 (`1.2x`) へスムーズに復帰します。
+- **5レイヤー広告遮断シールド (`🛡️ Reklam Kalkanı`):**
+  - **レイヤー 1 (CDP Fetch インターセプト - uBlock Origin 方式):** Chromium の `Fetch.enable` / `Fetch.requestPaused` プロトコルドメインを使い、1バイトも読み込まれる前のリクエスト段階で広告をブロックします。プレイヤー統合型広告には空の VAST/VPAID XML を返します。
+  - **レイヤー 2 (ネットワーク広告＆トラッカー遮断):** Chromium ネットワーク層にて Amazon 広告サーバー (`amazon-adsystem.com`)、テレメトリー、追跡ドメインを直接ブロックします (`Network.setBlockedURLs`)。
+  - **レイヤー 3 (CSS バナー＆カウントダウン削除):** 「広告 1/2」表示、カウントダウンバナー、画面オーバーレイを完全に非表示化します (`display: none !important`)。
+  - **レイヤー 4 (ブラックアウトカーテン＆自動ミュート):** スキップ不可の強制広告 (SSAI) 時に音声を即座に消音 (`video.muted = true`) し、映像を暗転した `⚡ Reklam Atlanıyor...` カーテン (`opacity: 0`) で覆い隠します。広告の音声も映像も一切流れません。
+  - **レイヤー 5 (自動スキップ＆16倍速超高速消化):** 「広告をスキップ」ボタンが出現した瞬間に自動クリック。スキップ不可広告の場合は再生速度を `16倍速` (`video.playbackRate = 16`) に引き上げ数秒で終了させ、本来の動画速度 (`1.2x`) へスムーズに復帰します。
 - **再生中のスマート自動非表示:** 動画再生開始 (`play`/`playing`) またはマウス停止のちょうど2秒後にボタンがスムーズにフェードアウト (`opacity: 0`) し、公式プレイヤーと調和した美しい画面を提供します。マウスを動かすと即座に再表示されます。
 - **コンパクトステータスインジケーター:** 現在の速度とモードアイコンを表示します：
   - **`1.2x ●`**：字幕カラー変更が有効な場合（点が選択カラーで発光します）。
@@ -1114,17 +1123,18 @@ MIT ライセンスの下で公開されています。詳細は [LICENSE](LICEN
 
 Prime Video Speed & Subtitle Controller adalah alat bantu open-source yang ringan untuk Windows, yang membuka Prime Video di jendela aplikasi Microsoft Edge khusus serta menampilkan tombol kontrol elegan dan dapat digeser (`1.2x ●` / `1.2x ⚡`) saat pemutar video terdeteksi. Kontrol ini tidak mengganggu tampilan, dapat dipindahkan ke posisi mana pun di layar, dan mengingat preferensi kecepatan pemutaran serta warna subtitle Anda secara lokal.
 
-Selain penstabil warna subtitle multilapis (default warna **Kuning `#FFCC00`**), proyek ini dilengkapi **Perisai Iklan 4 Lapis Tanpa Tampilan (Zero-Visibility Ad Shield)**. Perisai ini memblokir pelacak iklan di tingkat jaringan (`Network.setBlockedURLs`) dan membisukan iklan wajib yang tidak dapat dilewati sembari mempercepatnya hingga `16x` di balik layar hitam (`Zero-Visibility`). Pengaturan kecepatan pemutaran normal untuk pengguna berkisar dari `0.25x` hingga `4.0x`.
+Selain penstabil warna subtitle multilapis (default warna **Kuning `#FFCC00`**), proyek ini dilengkapi **Perisai Iklan 5 Lapis Tanpa Tampilan (Zero-Visibility Ad Shield)**. Perisai ini memblokir pelacak iklan di tingkat jaringan (`Network.setBlockedURLs`) dan membisukan iklan wajib yang tidak dapat dilewati sembari mempercepatnya hingga `16x` di balik layar hitam (`Zero-Visibility`). Pengaturan kecepatan pemutaran normal untuk pengguna berkisar dari `0.25x` hingga `4.0x`.
 
 ### Fitur
 
 - Membuka Prime Video di jendela aplikasi Microsoft Edge khusus (`--remote-debugging-address=127.0.0.1`).
 - Menampilkan tombol kecepatan & subtitle (`1.2x ●` / `1.2x ⚡`) hanya ketika video sedang diputar.
-- **Perisai Iklan 4 Lapis Tanpa Tampilan (`🛡️ Reklam Kalkanı`):**
-  - **Lapis 1 (Pemblokir Jaringan Iklan & Pelacak):** Memblokir server iklan Amazon (`amazon-adsystem.com`), telemetri, dan pelacak langsung pada lapisan jaringan Chromium (`Network.setBlockedURLs`).
-  - **Lapis 2 (Penghancur Spanduk & Penghitung Mundur CSS):** Menyembunyikan pesan "Ad 1 of 2", spanduk hitung mundur iklan, dan lapisan penutup secara permanen (`display: none !important`).
-  - **Lapis 3 (Tirai Hitam & Bisu Otomatis):** Selama jeda iklan wajib SSAI, suara langsung dibisukan (`video.muted = true`) dan video ditutup oleh tirai gelap `⚡ Reklam Atlanıyor...` (`opacity: 0`). Anda tidak melihat atau mendengar komersial apa pun.
-  - **Lapis 4 (Klik Lewati Otomatis & Kecepatan 16x):** Mengklik tombol "Lewati Iklan" secara otomatis pada milidetik pertama munculnya. Jika iklan tidak dapat dilewati, video dipercepat ke kecepatan `16x` (`video.playbackRate = 16`) untuk menyelesaikannya dalam hitungan detik sebelum kembali ke kecepatan normal (`1.2x`).
+- **Perisai Iklan 5 Lapis Tanpa Tampilan (`🛡️ Reklam Kalkanı`):**
+  - **Lapis 1 (Intersepsi CDP Fetch - gaya uBlock Origin):** Menggunakan domain protokol `Fetch.enable` dan `Fetch.requestPaused` Chromium untuk memblokir iklan pada tahap permintaan, sebelum satu byte pun dimuat. Mengembalikan respons XML VAST/VPAID kosong untuk iklan yang tertanam di pemutar.
+  - **Lapis 2 (Pemblokir Jaringan Iklan & Pelacak):** Memblokir server iklan Amazon (`amazon-adsystem.com`), telemetri, dan pelacak langsung pada lapisan jaringan Chromium (`Network.setBlockedURLs`).
+  - **Lapis 3 (Penghancur Spanduk & Penghitung Mundur CSS):** Menyembunyikan pesan "Ad 1 of 2", spanduk hitung mundur iklan, dan lapisan penutup secara permanen (`display: none !important`).
+  - **Lapis 4 (Tirai Hitam & Bisu Otomatis):** Selama jeda iklan wajib SSAI, suara langsung dibisukan (`video.muted = true`) dan video ditutup oleh tirai gelap `⚡ Reklam Atlanıyor...` (`opacity: 0`). Anda tidak melihat atau mendengar komersial apa pun.
+  - **Lapis 5 (Klik Lewati Otomatis & Kecepatan 16x):** Mengklik tombol "Lewati Iklan" secara otomatis pada milidetik pertama munculnya. Jika iklan tidak dapat dilewati, video dipercepat ke kecepatan `16x` (`video.playbackRate = 16`) untuk menyelesaikannya dalam hitungan detik sebelum kembali ke kecepatan normal (`1.2x`).
 - **Sembunyi Otomatis (Auto-Hide) Saat Pemutaran:** Tepat 2 detik setelah pemutaran video dimulai (`play`/`playing`) atau mouse berhenti bergerak, tombol fluktuatif menghilang perlahan (`opacity: 0`) untuk pengalaman menonton yang bersih. Muncul kembali seketika saat mouse digerakkan.
 - **Indikator Status Kompak:** Menampilkan kecepatan saat ini serta ikon mode:
   - **`1.2x ●`** saat kustomisasi subtitle AKTIF (titik bersinar dengan warna pilihan Anda).
