@@ -228,15 +228,23 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
     var checkBytes = Encoding.UTF8.GetBytes(checkPayload);
     await socket.SendAsync(checkBytes, WebSocketMessageType.Text, true, cts.Token);
 
-    var buffer = new byte[4096];
-    var result = await socket.ReceiveAsync(buffer, cts.Token);
-    if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
+    var buffer = new byte[8192];
+    for (int i = 0; i < 10; i++)
     {
-        var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
-        if (responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
+        var result = await socket.ReceiveAsync(buffer, cts.Token);
+        if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
         {
-            return;
+            var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            if (responseText.Contains("\"id\":1", StringComparison.OrdinalIgnoreCase) || responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
+            {
+                if (responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                break;
+            }
         }
+        if (cts.Token.IsCancellationRequested) break;
     }
 
     var fullPayload = JsonSerializer.Serialize(new
@@ -253,7 +261,19 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
 
     var fullBytes = Encoding.UTF8.GetBytes(fullPayload);
     await socket.SendAsync(fullBytes, WebSocketMessageType.Text, true, cts.Token);
-    await socket.ReceiveAsync(buffer, cts.Token);
+    for (int i = 0; i < 10; i++)
+    {
+        var result = await socket.ReceiveAsync(buffer, cts.Token);
+        if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
+        {
+            var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            if (responseText.Contains("\"id\":2", StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+        }
+        if (cts.Token.IsCancellationRequested) break;
+    }
 }
 
 static JsonSerializerOptions JsonOptions()
@@ -370,24 +390,24 @@ internal static class AppIconHelper
         if (EdgeProcess != null && !EdgeProcess.HasExited && windowPid == EdgeProcess.Id)
             return true;
 
+        // 1. Exclude windows whose title looks like an IDE / editor / tab search right away before opening Process handle
+        if (titleStr.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
+            titleStr.Contains("Visual Studio", StringComparison.OrdinalIgnoreCase) ||
+            titleStr.Contains("Cursor", StringComparison.OrdinalIgnoreCase) ||
+            titleStr.Contains(".cs", StringComparison.OrdinalIgnoreCase) ||
+            titleStr.Contains(".md", StringComparison.OrdinalIgnoreCase) ||
+            titleStr.Contains(".js", StringComparison.OrdinalIgnoreCase) ||
+            titleStr.Contains("Altyazı Öz", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         try
         {
             using var proc = Process.GetProcessById((int)windowPid);
-            // 1. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
+            // 2. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
             if (!proc.ProcessName.Equals("msedge", StringComparison.OrdinalIgnoreCase))
                 return false;
-
-            // 2. Exclude windows whose title looks like an IDE / editor / tab search
-            if (titleStr.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
-                titleStr.Contains("Visual Studio", StringComparison.OrdinalIgnoreCase) ||
-                titleStr.Contains("Cursor", StringComparison.OrdinalIgnoreCase) ||
-                titleStr.Contains(".cs", StringComparison.OrdinalIgnoreCase) ||
-                titleStr.Contains(".md", StringComparison.OrdinalIgnoreCase) ||
-                titleStr.Contains(".js", StringComparison.OrdinalIgnoreCase) ||
-                titleStr.Contains("Altyazı Öz", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
 
             // 3. Must match Prime Video or Amazon in the title
             if (titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) || titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
@@ -431,22 +451,35 @@ internal static class AppIconHelper
                     {
                         if (SHGetPropertyStoreForWindow(hWnd, ref storeGuid, out var propStore) == 0 && propStore != null)
                         {
-                            var pvAumid = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni("PrimeVideoSpeedController.App") };
-                            propStore.SetValue(ref pkeyAumid, ref pvAumid);
-                            PropVariantClear(ref pvAumid);
-
-                            var pvIcon = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(iconPath) };
-                            propStore.SetValue(ref pkeyIcon, ref pvIcon);
-                            PropVariantClear(ref pvIcon);
-
-                            if (!string.IsNullOrEmpty(exePath))
+                            try
                             {
-                                var pvCmd = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(exePath) };
-                                propStore.SetValue(ref pkeyCmd, ref pvCmd);
-                                PropVariantClear(ref pvCmd);
-                            }
+                                var pvAumid = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni("PrimeVideoSpeedController.App") };
+                                propStore.SetValue(ref pkeyAumid, ref pvAumid);
+                                PropVariantClear(ref pvAumid);
 
-                            propStore.Commit();
+                                var pvIcon = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(iconPath) };
+                                propStore.SetValue(ref pkeyIcon, ref pvIcon);
+                                PropVariantClear(ref pvIcon);
+
+                                if (!string.IsNullOrEmpty(exePath))
+                                {
+                                    var pvCmd = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(exePath) };
+                                    propStore.SetValue(ref pkeyCmd, ref pvCmd);
+                                    PropVariantClear(ref pvCmd);
+                                }
+
+                                propStore.Commit();
+                            }
+                            finally
+                            {
+                                if (Marshal.IsComObject(propStore))
+                                {
+                                    if (OperatingSystem.IsWindows())
+                                    {
+                                        Marshal.ReleaseComObject(propStore);
+                                    }
+                                }
+                            }
                         }
                     }
                     catch { }

@@ -56,6 +56,7 @@
   let currentObservedContainer = null;
   let subtitleObserver = null;
   let attachedVideo = null;
+  let mutationThrottleTimer = 0;
 
   let isAdCurrentlyActive = false;
   let wasMutedBeforeAd = false;
@@ -310,6 +311,7 @@
       subtitleObserver.disconnect();
     } else {
       subtitleObserver = new MutationObserver((mutations) => {
+        if (mutationThrottleTimer) return;
         let shouldApplySubtitles = false;
         let shouldCheckAds = false;
         for (const mutation of mutations) {
@@ -331,11 +333,12 @@
             if (shouldApplySubtitles) break;
           }
         }
-        if (shouldCheckAds) {
-          checkAndHandleAds();
-        }
-        if (shouldApplySubtitles) {
-          applySubtitleStyles();
+        if (shouldCheckAds || shouldApplySubtitles) {
+          mutationThrottleTimer = window.setTimeout(() => {
+            mutationThrottleTimer = 0;
+            if (shouldCheckAds) checkAndHandleAds();
+            if (shouldApplySubtitles) applySubtitleStyles();
+          }, 150);
         }
       });
     }
