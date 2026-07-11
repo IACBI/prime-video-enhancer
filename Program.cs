@@ -233,60 +233,14 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
     });
     await socket.SendAsync(Encoding.UTF8.GetBytes(blockedUrlsPayload), WebSocketMessageType.Text, true, cts.Token);
 
-    // --- Layer 2: Fetch.enable (uBlock-style request interception) ---
-    var fetchEnablePayload = JsonSerializer.Serialize(new
-    {
-        id = 12,
-        method = "Fetch.enable",
-        @params = new
-        {
-            patterns = new object[]
-            {
-                new { urlPattern = "*amazon-adsystem.com*", requestStage = "Request" },
-                new { urlPattern = "*unagi*.amazon.com*", requestStage = "Request" },
-                new { urlPattern = "*aan.amazon.com*", requestStage = "Request" },
-                new { urlPattern = "*fls-*.amazon.com*", requestStage = "Request" },
-                new { urlPattern = "*mads*.amazon.com*", requestStage = "Request" },
-                new { urlPattern = "*device-metrics*.amazon.com*", requestStage = "Request" },
-                new { urlPattern = "*doubleclick.net*", requestStage = "Request" },
-                new { urlPattern = "*googlesyndication.com*", requestStage = "Request" },
-                new { urlPattern = "*googleadservices.com*", requestStage = "Request" },
-                new { urlPattern = "*google-analytics.com*", requestStage = "Request" },
-                new { urlPattern = "*googletagmanager.com*", requestStage = "Request" },
-                new { urlPattern = "*fwmrm.net*", requestStage = "Request" },
-                new { urlPattern = "*flashtalking.com*", requestStage = "Request" },
-                new { urlPattern = "*innovid.com*", requestStage = "Request" },
-                new { urlPattern = "*scorecardresearch.com*", requestStage = "Request" },
-                new { urlPattern = "*moatads.com*", requestStage = "Request" },
-                new { urlPattern = "*serving-sys.com*", requestStage = "Request" },
-                new { urlPattern = "*adsrvr.org*", requestStage = "Request" },
-                new { urlPattern = "*adnxs.com*", requestStage = "Request" },
-                new { urlPattern = "*rubiconproject.com*", requestStage = "Request" },
-                new { urlPattern = "*pubmatic.com*", requestStage = "Request" },
-                new { urlPattern = "*openx.net*", requestStage = "Request" },
-                new { urlPattern = "*casalemedia.com*", requestStage = "Request" },
-                new { urlPattern = "*advertising.com*", requestStage = "Request" },
-                new { urlPattern = "*spotxchange.com*", requestStage = "Request" },
-                new { urlPattern = "*spotx.tv*", requestStage = "Request" },
-                new { urlPattern = "*springserve.com*", requestStage = "Request" },
-                new { urlPattern = "*tremorhub.com*", requestStage = "Request" },
-                new { urlPattern = "*yieldmo.com*", requestStage = "Request" },
-                new { urlPattern = "*tapad.com*", requestStage = "Request" },
-                new { urlPattern = "*/vast/*", requestStage = "Request" },
-                new { urlPattern = "*/vpaid/*", requestStage = "Request" },
-                new { urlPattern = "*/vast.xml*", requestStage = "Request" },
-                new { urlPattern = "*/VAST*", requestStage = "Request" },
-                new { urlPattern = "*/ad-manifest*", requestStage = "Request" },
-                new { urlPattern = "*/interstitial*", requestStage = "Request" },
-                new { urlPattern = "*a2z.com/telemetry*", requestStage = "Request" },
-                new { urlPattern = "*a2z.com/gp/uedata*", requestStage = "Request" },
-                new { urlPattern = "*amazon-adsystem.com/aax2/*", requestStage = "Request" },
-                new { urlPattern = "*amazon-adsystem.com/e/dtb/*", requestStage = "Request" },
-                new { urlPattern = "*csm/csa*", requestStage = "Request" }
-            }
-        }
-    });
-    await socket.SendAsync(Encoding.UTF8.GetBytes(fetchEnablePayload), WebSocketMessageType.Text, true, cts.Token);
+    // NOTE: Fetch-domain interception is intentionally NOT enabled on this short-lived
+    // socket. It used to be (a separate Fetch.enable call here), but that socket is
+    // disposed as soon as this method returns, without ever reading/answering
+    // Fetch.requestPaused events on this session. CDP's Fetch domain is not designed
+    // for multiple concurrent owners on the same target, so having this ephemeral
+    // socket "own" an interception it never services raced against the persistent
+    // interceptor below (RunFetchInterceptorLoop) and could stall matching requests.
+    // The persistent interceptor is the single owner of Fetch interception per target.
 
     // --- Script injection (check if already installed with correct version) ---
     const string fastCheckExpression = "(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '3.0.0' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
@@ -368,53 +322,76 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
         await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), connectCts.Token);
 
         // Re-enable Fetch on this persistent connection
+        // Only pause requests that match a known ad/telemetry pattern (AdBlocker.Patterns).
+        // Previously this used a catch-all "*" pattern, which paused every single
+        // network request on the page (video segments, manifests, images, scripts)
+        // and round-tripped each one through this .NET process before Chromium was
+        // allowed to proceed — a major source of playback stutter/latency. Narrowing
+        // the pattern list means non-ad requests never enter the Fetch domain at all
+        // and load at full speed.
         var fetchEnablePayload = JsonSerializer.Serialize(new
         {
             id = 100,
             method = "Fetch.enable",
             @params = new
             {
-                patterns = new object[]
-                {
-                    new { urlPattern = "*", requestStage = "Request" }
-                }
+                patterns = AdBlocker.Patterns
+                    .Select(pattern => new { urlPattern = pattern, requestStage = "Request" })
+                    .ToArray()
             }
         });
         await socket.SendAsync(Encoding.UTF8.GetBytes(fetchEnablePayload), WebSocketMessageType.Text, true, CancellationToken.None);
 
         var buffer = new byte[32768];
+        var nextId = 300;
         while (socket.State == WebSocketState.Open)
         {
-            WebSocketReceiveResult result;
+            using var messageStream = new MemoryStream();
+            WebSocketReceiveResult? result = null;
             try
             {
-                using var recvCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                result = await socket.ReceiveAsync(buffer, recvCts.Token);
+                // A single CDP event can span multiple WebSocket frames (e.g. a
+                // Fetch.requestPaused event with large request headers). The previous
+                // implementation assumed one ReceiveAsync call always captured the
+                // full message and fed the (possibly truncated) bytes straight to
+                // JsonDocument.Parse; a truncated message threw, was swallowed by an
+                // empty catch, and the paused request was never resolved — it hung
+                // in the browser forever. Looping until EndOfMessage fixes this.
+                do
+                {
+                    using var recvCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    result = await socket.ReceiveAsync(buffer, recvCts.Token);
+                    if (result.MessageType == WebSocketMessageType.Close) break;
+                    if (result.Count > 0)
+                    {
+                        messageStream.Write(buffer, 0, result.Count);
+                    }
+                } while (!result.EndOfMessage);
             }
             catch (OperationCanceledException)
             {
-                // Send a ping to check connection is alive
+                // Receive timed out; send a ping to check the connection is still alive.
                 try
                 {
                     var pingPayload = JsonSerializer.Serialize(new
                     {
-                        id = 999,
+                        id = nextId++,
                         method = "Runtime.evaluate",
                         @params = new { expression = "1", returnByValue = true }
                     });
                     await socket.SendAsync(Encoding.UTF8.GetBytes(pingPayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                    continue;
                 }
                 catch
                 {
                     break;
                 }
+                continue;
             }
 
-            if (result.MessageType == WebSocketMessageType.Close) break;
-            if (result.MessageType != WebSocketMessageType.Text || result.Count == 0) continue;
+            if (result is null || result.MessageType == WebSocketMessageType.Close) break;
+            if (result.MessageType != WebSocketMessageType.Text || messageStream.Length == 0) continue;
 
-            var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            var responseText = Encoding.UTF8.GetString(messageStream.GetBuffer(), 0, (int)messageStream.Length);
 
             // Handle Fetch.requestPaused events
             if (responseText.Contains("\"Fetch.requestPaused\"", StringComparison.OrdinalIgnoreCase))
@@ -445,7 +422,7 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                                 var emptyVastBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(emptyVast));
                                 var fulfillPayload = JsonSerializer.Serialize(new
                                 {
-                                    id = 200,
+                                    id = nextId++,
                                     method = "Fetch.fulfillRequest",
                                     @params = new
                                     {
@@ -466,7 +443,7 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                                 // Block the ad request entirely
                                 var failPayload = JsonSerializer.Serialize(new
                                 {
-                                    id = 201,
+                                    id = nextId++,
                                     method = "Fetch.failRequest",
                                     @params = new
                                     {
@@ -482,7 +459,7 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                             // Allow non-ad requests to continue
                             var continuePayload = JsonSerializer.Serialize(new
                             {
-                                id = 202,
+                                id = nextId++,
                                 method = "Fetch.continueRequest",
                                 @params = new { requestId = requestId }
                             });
@@ -490,11 +467,17 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Ad shield: failed to handle a network request event ({ex.GetType().Name}: {ex.Message}).");
+                }
             }
         }
     }
-    catch { }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Ad shield: network interceptor for a Prime Video tab stopped ({ex.GetType().Name}: {ex.Message}). It will restart on the next poll.");
+    }
     finally
     {
         AdBlocker.ActiveInterceptors.Remove(webSocketDebuggerUrl);
@@ -511,25 +494,25 @@ static JsonSerializerOptions JsonOptions()
 
 internal static class AdBlocker
 {
+    // Single source of truth for ad/telemetry URL glob patterns, consumed by both
+    // Network.setBlockedURLs and the Fetch.enable interception patterns. Wildcards
+    // are broadened (e.g. "*aax-*.amazon-adsystem.com*") to cover regional edge
+    // hosts without needing a new entry per region, and to avoid the drift that
+    // previously existed between this list and a second, hand-maintained copy
+    // inlined in InjectSpeedControl.
     public static readonly string[] Patterns = new[]
     {
         "*amazon-adsystem.com*",
-        "*unagi.amazon.com*",
-        "*unagi-na.amazon.com*",
-        "*aax-us-east.amazon-adsystem.com*",
-        "*aax-us-iad.amazon-adsystem.com*",
-        "*aax-eu.amazon-adsystem.com*",
-        "*aax-fe.amazon-adsystem.com*",
-        "*aan.amazon.com*",
+        "*aax-*.amazon-adsystem.com*",
+        "*amazon-adsystem.com/aax2/*",
+        "*amazon-adsystem.com/e/dtb/*",
+        "*unagi*.amazon.com*",
         "*aan.amazon.co*",
-        "*fls-na.amazon.com*",
-        "*fls-eu.amazon.com*",
-        "*fls-fe.amazon.com*",
-        "*device-metrics-us.amazon.com*",
-        "*device-metrics-us-2.amazon.com*",
-        "*mads-eu.amazon.com*",
-        "*mads.amazon.com*",
+        "*fls-*.amazon.com*",
+        "*device-metrics*.amazon.com*",
+        "*mads*.amazon.com*",
         "*m.media-amazon.com/images/G/01/csm/*",
+        "*csm/csa*",
         "*a2z.com/telemetry*",
         "*a2z.com/gp/uedata*",
         "*completion.amazon.com/api/2017/suggestions*",
@@ -563,9 +546,7 @@ internal static class AdBlocker
         "*spotx.tv*",
         "*springserve.com*",
         "*tremorhub.com*",
-        "*yieldmo.com*",
-        "*amazon-adsystem.com/aax2/amzn_ads.js*",
-        "*amazon-adsystem.com/e/dtb/*"
+        "*yieldmo.com*"
     };
 
     static readonly HashSet<string> Domains = new(StringComparer.OrdinalIgnoreCase)

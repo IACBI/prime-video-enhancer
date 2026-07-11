@@ -24,6 +24,43 @@
     { name: "Mavi", hex: "#00FFFF" },
   ];
 
+  // How many consecutive "no ad detected" ticks are required before ad-mode is
+  // exited. A single missed detection (e.g. Prime Video briefly re-rendering the
+  // indicator element during an ad-to-content transition) would otherwise unmute/
+  // un-freeze the video prematurely and immediately re-trigger ad-mode on the next
+  // tick, producing an audible/visible flicker right at ad boundaries.
+  const AD_END_CONFIRM_TICKS = 2;
+
+  const AD_SKIP_BUTTON_SELECTOR =
+    ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]";
+
+  // Note: .atvwebplayersdk-ad-resume-message is intentionally excluded here. It
+  // appears once the ad break has ENDED and real content is resuming, so treating
+  // it as an "ad still active" signal (as before) kept the video muted/16x-speed/
+  // frozen for the first few seconds of real content.
+  const AD_INDICATOR_SELECTOR = [
+    ".atvwebplayersdk-ad-timer-countdown",
+    ".atvwebplayersdk-ad-timer",
+    ".atvwebplayersdk-ad-timer-text",
+    ".atvwebplayersdk-ad-timer-remaining-time",
+    ".atvwebplayersdk-ad-indicator",
+    ".atvwebplayersdk-adbreak-indicator",
+    "[class*='adIndicator' i]",
+    "[class*='adBreak' i]",
+    "[class*='adTimer' i]",
+    "[class*='adCountdown' i]",
+    "[class*='ad-timer' i]",
+    "[class*='ad-break' i]",
+    "[class*='ad-countdown' i]",
+    "[data-testid*='ad-indicator' i]",
+    "[data-testid*='ad-break' i]",
+    "[data-testid*='ad-timer' i]",
+    "[data-testid*='ad-countdown' i]",
+    ".ad-timer",
+    ".ad-countdown",
+    ".ad-break-container"
+  ].join(", ");
+
   if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.0.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
@@ -60,6 +97,7 @@
 
   let isAdCurrentlyActive = false;
   let wasMutedBeforeAd = false;
+  let noAdStreak = 0;
 
   function clamp(value) {
     return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
@@ -151,12 +189,11 @@
   }
 
   function ensureAdShieldStyle() {
-    let style = document.getElementById(AD_SHIELD_STYLE_ID);
-    if (!style) {
-      style = document.createElement("style");
-      style.id = AD_SHIELD_STYLE_ID;
-      document.documentElement.appendChild(style);
+    if (document.getElementById(AD_SHIELD_STYLE_ID)) {
+      return;
     }
+    const style = document.createElement("style");
+    style.id = AD_SHIELD_STYLE_ID;
     style.textContent = `
       .atvwebplayersdk-ad-indicator,
       .atvwebplayersdk-adbreak-indicator,
@@ -196,6 +233,7 @@
         object-fit: contain !important;
       }
     `;
+    document.documentElement.appendChild(style);
   }
 
   function captureVideoFrame(video) {
@@ -229,7 +267,18 @@
 
   function isAdIndicatorActive(ind) {
     if (!ind || !document.body.contains(ind)) return false;
-    if (ind.offsetParent === null && ind.clientWidth === 0 && ind.clientHeight === 0) {
+    // Use getBoundingClientRect + getComputedStyle rather than offsetParent/clientWidth:
+    // offsetParent is null for position:fixed elements even when they're genuinely
+    // visible, which previously caused false "hidden" results for such elements.
+    // Note: intentionally does NOT check computed opacity — ensureAdShieldStyle()
+    // cosmetically sets opacity:0 on these same selectors, which would otherwise make
+    // every real ad indicator look "inactive" and disable ad detection entirely.
+    const rect = ind.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return false;
+    }
+    const computed = window.getComputedStyle(ind);
+    if (computed.display === "none" || computed.visibility === "hidden") {
       return false;
     }
     if (typeof ind.className === "string") {
@@ -237,11 +286,8 @@
         return false;
       }
     }
-    if (ind.style.display === "none" || ind.style.visibility === "hidden") {
-      return false;
-    }
     const text = (ind.textContent || "").trim();
-    if (/^0:00$/i.test(text)) {
+    if (text === "" || /^0:00$/i.test(text)) {
       return false;
     }
     return true;
@@ -252,45 +298,24 @@
     const video = findVideo();
     if (!video) return;
 
-    const skipButtons = document.querySelectorAll(
-      ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]"
-    );
+    const skipButtons = document.querySelectorAll(AD_SKIP_BUTTON_SELECTOR);
     for (const btn of skipButtons) {
       if (document.body.contains(btn) && (btn.offsetParent !== null || btn.clientWidth > 0 || btn.clientHeight > 0 || btn.style.display !== "none")) {
         try { btn.click(); } catch {}
       }
     }
 
-    const adIndicatorSelectors = [
-      ".atvwebplayersdk-ad-timer-countdown",
-      ".atvwebplayersdk-ad-timer",
-      ".atvwebplayersdk-ad-timer-text",
-      ".atvwebplayersdk-ad-timer-remaining-time",
-      ".atvwebplayersdk-ad-resume-message",
-      ".atvwebplayersdk-ad-indicator",
-      ".atvwebplayersdk-adbreak-indicator",
-      "[class*='adIndicator' i]",
-      "[class*='adBreak' i]",
-      "[class*='adTimer' i]",
-      "[class*='adCountdown' i]",
-      "[class*='ad-timer' i]",
-      "[class*='ad-break' i]",
-      "[class*='ad-countdown' i]",
-      "[data-testid*='ad-indicator' i]",
-      "[data-testid*='ad-break' i]",
-      "[data-testid*='ad-timer' i]",
-      "[data-testid*='ad-countdown' i]",
-      ".ad-timer",
-      ".ad-countdown",
-      ".ad-break-container"
-    ];
-    const adIndicators = document.querySelectorAll(adIndicatorSelectors.join(", "));
+    const adIndicators = document.querySelectorAll(AD_INDICATOR_SELECTOR);
     let adDetected = false;
     for (const ind of adIndicators) {
       if (isAdIndicatorActive(ind)) {
         adDetected = true;
         break;
       }
+    }
+
+    if (adDetected) {
+      noAdStreak = 0;
     }
 
     if (adDetected && !isAdCurrentlyActive) {
@@ -311,17 +336,28 @@
       if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
       if (video.muted !== true) video.muted = true;
       if (video.style.opacity !== "0") video.style.opacity = "0";
+      // Retry capturing the freeze-frame if it failed at ad-start (e.g. the video's
+      // next frame hadn't decoded yet) — showFreezeFrame() itself no-ops once a
+      // canvas is already showing, so this is safe to call every tick.
+      showFreezeFrame(video);
       if (video.paused) {
         try { video.play(); } catch {}
       }
     } else if (isAdCurrentlyActive && !adDetected) {
-      isAdCurrentlyActive = false;
-      video.muted = wasMutedBeforeAd;
-      video.style.opacity = "1";
-      removeFreezeFrame();
-      video.playbackRate = speed;
-      video.defaultPlaybackRate = speed;
-      applySpeed();
+      // Require a couple of consecutive negative ticks before declaring the ad
+      // over, to avoid flicker if an indicator element briefly disappears during
+      // Prime Video's own re-render at the ad/content boundary.
+      noAdStreak += 1;
+      if (noAdStreak >= AD_END_CONFIRM_TICKS) {
+        noAdStreak = 0;
+        isAdCurrentlyActive = false;
+        video.muted = wasMutedBeforeAd;
+        video.style.opacity = "1";
+        removeFreezeFrame();
+        video.playbackRate = speed;
+        video.defaultPlaybackRate = speed;
+        applySpeed();
+      }
     }
   }
 
@@ -392,16 +428,14 @@
   }
 
   function updateSubtitleObserver() {
-    if (!subtitleEnabled) {
-      if (subtitleObserver) {
-        subtitleObserver.disconnect();
-        currentObservedContainer = null;
-      }
-      return;
-    }
-
+    // This observer drives both ad detection and subtitle restyling reactions to
+    // DOM mutations, so it must stay connected regardless of subtitleEnabled —
+    // otherwise disabling subtitles would silently degrade ad-detection latency
+    // from "near-instant on mutation" to "up to 200ms" (the setInterval fallback),
+    // an unintended coupling between two unrelated features. Only the subtitle
+    // restyling *action* inside the callback is gated on subtitleEnabled below.
     const video = findVideo();
-    const targetContainer = video 
+    const targetContainer = video
       ? (video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, [id*='player' i], #player, .player") || video.parentElement || document.body)
       : document.body;
 
@@ -439,7 +473,7 @@
           mutationThrottleTimer = window.setTimeout(() => {
             mutationThrottleTimer = 0;
             if (shouldCheckAds) checkAndHandleAds();
-            if (shouldApplySubtitles) applySubtitleStyles();
+            if (shouldApplySubtitles && subtitleEnabled) applySubtitleStyles();
           }, 150);
         }
       });
