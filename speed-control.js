@@ -563,7 +563,7 @@
             mutationThrottleTimer = 0;
             if (shouldCheckAds) checkAndHandleAds();
             if (shouldApplySubtitles && subtitleEnabled) applySubtitleStyles();
-          }, 150);
+          }, 50);
         }
       });
     }
@@ -648,15 +648,16 @@
         color: #f7f7f8;
         font: inherit;
         cursor: grab;
-        background: rgba(28, 31, 38, 0.86);
-        border: 1px solid rgba(255, 255, 255, 0.24);
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 10px;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+        box-shadow: none;
         user-select: none;
-        backdrop-filter: blur(12px);
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 1);
+        transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
       }
       .pvsc-speed-button:active {
         cursor: grabbing;
@@ -706,7 +707,13 @@
         transition: background 120ms ease, border-color 120ms ease;
       }
       .pvsc-speed-button:hover,
-      .pvsc-speed-button:focus,
+      .pvsc-speed-button:focus {
+        background: rgba(25, 25, 25, 0.6);
+        border-color: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(8px);
+        outline: none;
+      }
       .pvsc-menu button:hover,
       .pvsc-menu button:focus {
         background: rgba(255, 255, 255, 0.18);

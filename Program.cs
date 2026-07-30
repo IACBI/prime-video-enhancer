@@ -545,7 +545,15 @@ internal static class AdBlocker
         "*spotx.tv*",
         "*springserve.com*",
         "*tremorhub.com*",
-        "*yieldmo.com*"
+        "*yieldmo.com*",
+        "*ad-delivery.net*",
+        "*adtech.de*",
+        "*smartadserver.com*",
+        "*imrworldwide.com*",
+        "*quantserve.com*",
+        "*quantcount.com*",
+        "*amazon.com/api/ads/*",
+        "*amazon.com/api/telemetry/*"
     };
 
     // Generic path-shaped globs (no host component). These are ONLY safe as
@@ -584,7 +592,9 @@ internal static class AdBlocker
         "adsrvr.org", "adnxs.com", "rubiconproject.com",
         "pubmatic.com", "openx.net", "casalemedia.com",
         "advertising.com", "tapad.com", "spotxchange.com",
-        "spotx.tv", "springserve.com", "tremorhub.com", "yieldmo.com"
+        "spotx.tv", "springserve.com", "tremorhub.com", "yieldmo.com",
+        "ad-delivery.net", "adtech.de", "smartadserver.com",
+        "imrworldwide.com", "quantserve.com", "quantcount.com"
     };
 
     static readonly string[] PathPatterns = new[]
