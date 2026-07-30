@@ -8,6 +8,10 @@
   const POSITION_KEY = "primeVideoSpeedControl.position";
   const SUBTITLE_STORAGE_KEY = "primeVideoSpeedControl.subtitleColor";
   const SUBTITLE_ENABLED_KEY = "primeVideoSpeedControl.subtitleEnabled";
+  const SUBTITLE_SIZE_KEY = "primeVideoSpeedControl.subtitleSize";
+  const SUBTITLE_BG_KEY = "primeVideoSpeedControl.subtitleBg";
+  const ADS_BLOCKED_KEY = "primeVideoSpeedControl.adsBlockedCount";
+  const ADS_SAVED_SEC_KEY = "primeVideoSpeedControl.adsTimeSavedSecs";
   
   const MIN_SPEED = 0.25;
   const MAX_SPEED = 4;
@@ -47,6 +51,19 @@
   // still handled — only the mute/hide/16x shield is suppressed.
   const AD_COOLDOWN_AFTER_VALVE_MS = 120000;
 
+  const AUTO_SKIP_SELECTOR = [
+    ".atvwebplayersdk-skip-button",
+    ".atvwebplayersdk-next-episode",
+    "[class*='skip-intro' i]",
+    "[class*='skipIntro' i]",
+    "[class*='next-episode' i]",
+    "[class*='nextEpisode' i]",
+    "[class*='skip-recap' i]",
+    "[class*='skipRecap' i]",
+    "[data-testid*='skip-intro' i]",
+    "[data-testid*='next-episode' i]"
+  ].join(", ");
+
   const AD_SKIP_BUTTON_SELECTOR =
     ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]";
 
@@ -77,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.2.0") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -96,6 +113,11 @@
   }
 
   let subtitleEnabled = window.localStorage.getItem(SUBTITLE_ENABLED_KEY) !== "false";
+  let subtitleSize = window.localStorage.getItem(SUBTITLE_SIZE_KEY) || "100%";
+  let subtitleBg = window.localStorage.getItem(SUBTITLE_BG_KEY) || "shadow"; // transparent, shadow, solid
+  
+  let adsBlockedCount = parseInt(window.localStorage.getItem(ADS_BLOCKED_KEY) || "0", 10);
+  let adsTimeSavedSecs = parseInt(window.localStorage.getItem(ADS_SAVED_SEC_KEY) || "0", 10);
 
   let hideTimer = 0;
   let isMenuOpen = false;
@@ -134,6 +156,21 @@
     } else {
       speedButton.innerHTML = `${formattedSpeed} <span style="color: rgba(255,255,255,0.48); margin-left: 6px; font-size: 12px;">⚡</span>`;
     }
+  }
+
+  function updateStatsDisplay() {
+    const statsEl = document.getElementById("pvsc-stats-text");
+    if (statsEl) {
+      statsEl.textContent = `🛡️ ${adsBlockedCount} reklam engellendi (~${Math.floor(adsTimeSavedSecs / 60)} dk tasarruf)`;
+    }
+  }
+
+  function incrementAdStats(count, secs) {
+    adsBlockedCount += count;
+    adsTimeSavedSecs += secs;
+    window.localStorage.setItem(ADS_BLOCKED_KEY, String(adsBlockedCount));
+    window.localStorage.setItem(ADS_SAVED_SEC_KEY, String(adsTimeSavedSecs));
+    updateStatsDisplay();
   }
 
   function findVideo() {
@@ -373,6 +410,11 @@
   }
 
   function exitAdMode(video) {
+    if (isAdCurrentlyActive && adModeStartedAt > 0) {
+      const timeSpentAt16x = Date.now() - adModeStartedAt;
+      const savedSecs = Math.floor((timeSpentAt16x * 15) / 1000);
+      incrementAdStats(1, savedSecs);
+    }
     isAdCurrentlyActive = false;
     noAdStreak = 0;
     adModeStartedAt = 0;
@@ -389,10 +431,21 @@
     const video = findVideo();
     if (!video) return;
 
+    // Auto-Skip feature
+    const autoSkipButtons = document.querySelectorAll(AUTO_SKIP_SELECTOR);
+    for (const btn of autoSkipButtons) {
+      if (document.body.contains(btn) && (btn.offsetParent !== null || btn.clientWidth > 0 || btn.clientHeight > 0 || btn.style.display !== "none")) {
+        try { btn.click(); console.log("[pvsc] Auto-skipped intro/outro!"); } catch {}
+      }
+    }
+
     const skipButtons = document.querySelectorAll(AD_SKIP_BUTTON_SELECTOR);
     for (const btn of skipButtons) {
       if (document.body.contains(btn) && (btn.offsetParent !== null || btn.clientWidth > 0 || btn.clientHeight > 0 || btn.style.display !== "none")) {
-        try { btn.click(); } catch {}
+        try { 
+          btn.click(); 
+          incrementAdStats(1, 15);
+        } catch {}
       }
     }
 
@@ -462,12 +515,23 @@
       style.textContent = "";
       return;
     }
+    
+    let bgStyle = "background-color: rgba(0, 0, 0, 0.5) !important;";
+    let shadowStyle = "text-shadow: 0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1) !important;";
+    if (subtitleBg === "transparent") {
+      bgStyle = "background-color: transparent !important;";
+      shadowStyle = "text-shadow: 0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.85) !important;";
+    } else if (subtitleBg === "solid") {
+      bgStyle = "background-color: rgba(0, 0, 0, 0.9) !important;";
+    }
 
     style.textContent = `
       video::cue {
         color: ${subtitleColor} !important;
-        background-color: rgba(0, 0, 0, 0.78) !important;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95) !important;
+        font-size: ${subtitleSize} !important;
+        font-weight: 700 !important;
+        ${bgStyle}
+        ${shadowStyle}
       }
       .atvwebplayersdk-subtitle-text span,
       .atvwebplayersdk-captions-text span,
@@ -479,7 +543,10 @@
       .atvwebplayersdk-subtitle-container span,
       .atvwebplayersdk-captions-container span {
         color: ${subtitleColor} !important;
-        text-shadow: 0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1) !important;
+        font-size: ${subtitleSize} !important;
+        font-weight: 700 !important;
+        ${bgStyle}
+        ${shadowStyle}
       }
     `;
   }
@@ -606,6 +673,27 @@
     ensureSubtitleStyle();
     applySubtitleStyles();
     updateSubtitleObserver();
+  }
+
+  function cycleSubtitleSize() {
+    if (subtitleSize === "70%") subtitleSize = "100%";
+    else if (subtitleSize === "100%") subtitleSize = "130%";
+    else if (subtitleSize === "130%") subtitleSize = "160%";
+    else subtitleSize = "70%";
+    window.localStorage.setItem(SUBTITLE_SIZE_KEY, subtitleSize);
+    ensureSubtitleStyle();
+    applySubtitleStyles();
+    updateActivePreset();
+  }
+
+  function cycleSubtitleBg() {
+    if (subtitleBg === "shadow") subtitleBg = "solid";
+    else if (subtitleBg === "solid") subtitleBg = "transparent";
+    else subtitleBg = "shadow";
+    window.localStorage.setItem(SUBTITLE_BG_KEY, subtitleBg);
+    ensureSubtitleStyle();
+    applySubtitleStyles();
+    updateActivePreset();
   }
 
   function ensureStyle() {
@@ -776,6 +864,19 @@
         border-color: #ffffff !important;
         box-shadow: 0 0 0 2px #3182ce, 0 0 8px rgba(255, 255, 255, 0.6);
       }
+      .pvsc-stats-row {
+        font-size: 10px;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.4);
+        padding-top: 4px;
+        margin-top: 2px;
+      }
+      .pvsc-subtitle-advanced-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        margin-top: 4px;
+      }
     `;
     document.documentElement.appendChild(style);
   }
@@ -921,10 +1022,28 @@
       subtitleToggleBtn.textContent = subtitleEnabled ? "Altyazı: Açık ✓" : "Altyazı: Kapalı";
     }
 
+    const sizeBtn = document.getElementById("pvsc-btn-subsize");
+    if (sizeBtn) {
+      let sizeLabel = "Normal";
+      if (subtitleSize === "70%") sizeLabel = "Küçük";
+      if (subtitleSize === "130%") sizeLabel = "Büyük";
+      if (subtitleSize === "160%") sizeLabel = "Dev";
+      sizeBtn.textContent = "Boyut: " + sizeLabel;
+    }
+
+    const bgBtn = document.getElementById("pvsc-btn-subbg");
+    if (bgBtn) {
+      let bgLabel = "Gölge";
+      if (subtitleBg === "solid") bgLabel = "Siyah";
+      if (subtitleBg === "transparent") bgLabel = "Şeffaf";
+      bgBtn.textContent = "Arkaplan: " + bgLabel;
+    }
+
     for (const swatch of menu.querySelectorAll("[data-color]")) {
       const colorVal = swatch.getAttribute("data-color");
       swatch.classList.toggle("pvsc-swatch-active", subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase());
     }
+    updateStatsDisplay();
   }
 
   function showControls() {
@@ -1046,6 +1165,28 @@
   }
   menu.appendChild(colorGrid);
 
+  const advancedSubGrid = document.createElement("div");
+  advancedSubGrid.className = "pvsc-subtitle-advanced-grid";
+
+  const sizeBtn = makeMenuButton("Boyut: Normal", "", () => cycleSubtitleSize());
+  sizeBtn.id = "pvsc-btn-subsize";
+  advancedSubGrid.appendChild(sizeBtn);
+
+  const bgBtn = makeMenuButton("Arkaplan: Gölge", "", () => cycleSubtitleBg());
+  bgBtn.id = "pvsc-btn-subbg";
+  advancedSubGrid.appendChild(bgBtn);
+
+  menu.appendChild(advancedSubGrid);
+
+  const divider2 = document.createElement("div");
+  divider2.className = "pvsc-divider";
+  menu.appendChild(divider2);
+
+  const statsRow = document.createElement("div");
+  statsRow.className = "pvsc-stats-row";
+  statsRow.id = "pvsc-stats-text";
+  menu.appendChild(statsRow);
+
   wrap.append(speedButton, menu);
   root.appendChild(wrap);
   document.documentElement.appendChild(root);
@@ -1135,15 +1276,29 @@
       return;
     }
 
-    if (event.key === "]") {
+    const key = event.key.toLowerCase();
+    if (key === "]" || key === "+" || key === "=" || event.key === "ArrowUp") {
+      event.preventDefault();
       setSpeed(speed + STEP);
       showControls();
-    } else if (event.key === "[") {
+    } else if (key === "[" || key === "-" || key === "_" || event.key === "ArrowDown") {
+      event.preventDefault();
       setSpeed(speed - STEP);
       showControls();
-    } else if (event.key === "\\") {
+    } else if (key === "\\") {
+      event.preventDefault();
       setSpeed(DEFAULT_SPEED);
       showControls();
+    } else if (key === "s") {
+      event.preventDefault();
+      setSubtitleEnabled(!subtitleEnabled);
+      showControls();
+    } else if (key === "n") {
+      event.preventDefault();
+      const autoSkipButtons = document.querySelectorAll(AUTO_SKIP_SELECTOR);
+      for (const btn of autoSkipButtons) {
+        if (isVisible(btn)) { try { btn.click(); } catch {} }
+      }
     } else if (event.key === "Escape") {
       setMenuOpen(false);
     }
@@ -1164,7 +1319,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.2.0",
+    version: "3.3.0",
     applySpeed,
     refresh,
     applySubtitleStyles,
