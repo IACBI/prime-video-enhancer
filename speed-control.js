@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.4") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.4.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -516,13 +516,16 @@
       return;
     }
     
-    let bgStyle = "background-color: rgba(0, 0, 0, 0.5) !important;";
-    let shadowStyle = "text-shadow: 0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1) !important;";
+    let bgCss = "";
+    let shadowCss = "text-shadow: 0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1) !important;";
     if (subtitleBg === "transparent") {
-      bgStyle = "background-color: transparent !important;";
-      shadowStyle = "text-shadow: 0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.85) !important;";
+      bgCss = "background-color: transparent !important;";
+      shadowCss = "text-shadow: 0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.85) !important;";
     } else if (subtitleBg === "solid") {
-      bgStyle = "background-color: rgba(0, 0, 0, 0.9) !important;";
+      bgCss = "background-color: rgba(0, 0, 0, 0.9) !important;";
+    } else {
+      // shadow (default)
+      bgCss = "background-color: rgba(0, 0, 0, 0.45) !important;";
     }
 
     style.textContent = `
@@ -530,8 +533,8 @@
         color: ${subtitleColor} !important;
         font-size: ${subtitleSize} !important;
         font-weight: 700 !important;
-        ${bgStyle}
-        ${shadowStyle}
+        ${bgCss}
+        ${shadowCss}
       }
       .atvwebplayersdk-subtitle-text,
       .atvwebplayersdk-captions-text,
@@ -547,33 +550,43 @@
       .timedText span {
         color: ${subtitleColor} !important;
         font-weight: 700 !important;
-        ${bgStyle}
-        ${shadowStyle}
+        ${bgCss}
+        ${shadowCss}
       }
     `;
   }
 
   function applySubtitleStyles() {
-    if (!subtitleEnabled) {
-      return;
-    }
     ensureSubtitleStyle();
+    if (!subtitleEnabled) return;
 
     const subtitleContainers = document.querySelectorAll(
       ".atvwebplayersdk-subtitle-text, .atvwebplayersdk-captions-text, .timedText, .atvwebplayersdk-subtitle-container, .atvwebplayersdk-captions-container"
     );
 
     for (const container of subtitleContainers) {
-      if (root.contains(container) || container.id === ROOT_ID) {
-        continue;
+      if (root.contains(container) || container.id === ROOT_ID) continue;
+
+      // Strip any inline background-color Prime Video injects so our CSS can win.
+      // We do NOT use setProperty("important") for bg here — our <style> tag already
+      // has the !important rule; removing the inline style lets it cascade through.
+      if (container instanceof HTMLElement && container.style.backgroundColor) {
+        container.style.removeProperty("background-color");
       }
+
       const spans = container.querySelectorAll("span, div, p");
       for (const el of spans) {
         if (root.contains(el)) continue;
-        const inlineColor = el.style.color;
-        if (inlineColor && inlineColor !== subtitleColor) {
-          el.style.setProperty("color", subtitleColor, "important");
-          el.style.setProperty("text-shadow", "0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1)", "important");
+        if (el instanceof HTMLElement) {
+          // Force color override when Prime Video injects its own inline color
+          const inlineColor = el.style.color;
+          if (inlineColor && inlineColor !== subtitleColor) {
+            el.style.setProperty("color", subtitleColor, "important");
+          }
+          // Strip inline background so our <style> bg rule wins
+          if (el.style.backgroundColor) {
+            el.style.removeProperty("background-color");
+          }
         }
       }
       if (container instanceof HTMLElement) {
@@ -677,14 +690,16 @@
     updateSubtitleObserver();
   }
 
-  function cycleSubtitleSize() {
-    if (subtitleSize === "100%") subtitleSize = "150%";
-    else if (subtitleSize === "150%") subtitleSize = "200%";
-    else if (subtitleSize === "200%") subtitleSize = "250%";
-    else subtitleSize = "100%";
+  function setSubtitleSize(val) {
+    const pct = parseInt(val, 10);
+    if (!Number.isFinite(pct) || pct < 50 || pct > 400) return;
+    subtitleSize = pct + "%";
     window.localStorage.setItem(SUBTITLE_SIZE_KEY, subtitleSize);
     ensureSubtitleStyle();
     applySubtitleStyles();
+    // Sync the input element if visible
+    const inp = document.getElementById("pvsc-size-input");
+    if (inp && inp.value !== String(pct)) inp.value = String(pct);
     updateActivePreset();
   }
 
@@ -1031,20 +1046,18 @@
       subtitleToggleBtn.textContent = subtitleEnabled ? "Subtitles: ON ✓" : "Subtitles: OFF";
     }
 
-    const sizeBtn = document.getElementById("pvsc-btn-subsize");
-    if (sizeBtn) {
-      let sizeLabel = "Normal";
-      if (subtitleSize === "100%" || subtitleSize === "70%") sizeLabel = "Small";
-      else if (subtitleSize === "200%" || subtitleSize === "130%") sizeLabel = "Large";
-      else if (subtitleSize === "250%" || subtitleSize === "160%") sizeLabel = "Huge";
-      sizeBtn.textContent = "Size: " + sizeLabel;
+    // Sync size input display value
+    const inp = document.getElementById("pvsc-size-input");
+    if (inp) {
+      const pct = parseInt(subtitleSize, 10);
+      if (Number.isFinite(pct) && inp.value !== String(pct)) inp.value = String(pct);
     }
 
     const bgBtn = document.getElementById("pvsc-btn-subbg");
     if (bgBtn) {
       let bgLabel = "Shadow";
       if (subtitleBg === "solid") bgLabel = "Solid";
-      if (subtitleBg === "transparent") bgLabel = "None";
+      else if (subtitleBg === "transparent") bgLabel = "None";
       bgBtn.textContent = "Bg: " + bgLabel;
     }
 
@@ -1174,18 +1187,65 @@
   }
   menu.appendChild(colorGrid);
 
-  const advancedSubGrid = document.createElement("div");
-  advancedSubGrid.className = "pvsc-subtitle-advanced-grid";
+  // ── Subtitle size row: label + number input + % label ──────────────────────
+  const sizeRow = document.createElement("div");
+  sizeRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;";
 
-  const sizeBtn = makeMenuButton("Size: Normal", "", () => cycleSubtitleSize());
-  sizeBtn.id = "pvsc-btn-subsize";
-  advancedSubGrid.appendChild(sizeBtn);
+  const sizeLabel = document.createElement("span");
+  sizeLabel.textContent = "Size";
+  sizeLabel.style.cssText = "font-size:12px;color:rgba(255,255,255,0.7);flex-shrink:0;";
 
+  const sizeInput = document.createElement("input");
+  sizeInput.id = "pvsc-size-input";
+  sizeInput.type = "number";
+  sizeInput.min = "50";
+  sizeInput.max = "400";
+  sizeInput.step = "10";
+  sizeInput.value = String(parseInt(subtitleSize, 10) || 150);
+  sizeInput.style.cssText = [
+    "flex:1",
+    "min-width:0",
+    "height:30px",
+    "padding:0 6px",
+    "background:rgba(255,255,255,0.09)",
+    "border:1px solid rgba(255,255,255,0.18)",
+    "border-radius:7px",
+    "color:#f7f7f8",
+    "font:inherit",
+    "font-size:13px",
+    "text-align:center",
+    "-moz-appearance:textfield",
+    "outline:none",
+  ].join(";");
+
+  const sizePct = document.createElement("span");
+  sizePct.textContent = "%";
+  sizePct.style.cssText = "font-size:12px;color:rgba(255,255,255,0.55);flex-shrink:0;";
+
+  // Commit on Enter or blur; let the input stay focused so user can keep typing
+  function commitSizeInput() {
+    setSubtitleSize(sizeInput.value);
+  }
+  sizeInput.addEventListener("change", commitSizeInput);
+  sizeInput.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // prevent global hotkeys from firing while typing
+    if (e.key === "Enter") { commitSizeInput(); sizeInput.blur(); }
+    if (e.key === "Escape") { sizeInput.blur(); }
+  });
+  // Prevent pointerdown from closing menu
+  sizeInput.addEventListener("pointerdown", (e) => e.stopPropagation());
+  sizeInput.addEventListener("click", (e) => { e.stopPropagation(); sizeInput.select(); });
+
+  sizeRow.appendChild(sizeLabel);
+  sizeRow.appendChild(sizeInput);
+  sizeRow.appendChild(sizePct);
+  menu.appendChild(sizeRow);
+
+  // ── Bg toggle button ─────────────────────────────────────────────────────────
   const bgBtn = makeMenuButton("Bg: Shadow", "", () => cycleSubtitleBg());
   bgBtn.id = "pvsc-btn-subbg";
-  advancedSubGrid.appendChild(bgBtn);
-
-  menu.appendChild(advancedSubGrid);
+  bgBtn.style.cssText = "margin-top:4px;width:100%;";
+  menu.appendChild(bgBtn);
 
   const divider2 = document.createElement("div");
   divider2.className = "pvsc-divider";
@@ -1328,7 +1388,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.3.4",
+    version: "3.4.0",
     applySpeed,
     refresh,
     applySubtitleStyles,
