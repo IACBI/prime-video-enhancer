@@ -1,8 +1,8 @@
 # Prime Video Speed & Subtitle Controller
 
-**Prime Video Speed & Subtitle Controller** is an open-source, lightweight Windows helper that opens Prime Video in a dedicated Microsoft Edge app window, adding a clean playback speed control (`1.2x ●` / `1.2x ⚡`), an automatic subtitle color stabilizer, and an always-on **5-Layer Zero-Visibility Ad Shield** (`🛡️ Reklam Kalkanı`).
+**Prime Video Speed & Subtitle Controller** is an open-source, lightweight Windows helper that opens Prime Video in a dedicated Microsoft Edge app window, adding a clean playback speed control, a fully-customizable subtitle overlay (color, size, and background), and an always-on **5-Layer Zero-Visibility Ad Shield** (`🛡️ Ad Shield`).
 
-It is built for viewers who want a seamless, commercial-free streaming experience with simple speed selection and consistent yellow subtitles without modifying the official Prime Video app, bypassing DRM, downloading video, or installing a browser extension.
+It is built for viewers who want a seamless, commercial-free streaming experience with simple speed selection and consistent subtitle styling without modifying the official Prime Video app, bypassing DRM, downloading video, or installing a browser extension.
 
 **Author:** **𝓐.𝓒.𝓑**  
 **License:** MIT  
@@ -26,24 +26,26 @@ In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC
 ### Features
 
 - Opens Prime Video in a dedicated Microsoft Edge app window (`--remote-debugging-address=127.0.0.1`).
-- Shows the speed & subtitle control (`1.2x ●` / `1.2x ⚡`) only when video playback is available.
-- **Always-On 5-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
+- Shows the speed & subtitle control only when video playback is available.
+- **Always-On 5-Layer Zero-Visibility Ad Shield (`🛡️ Ad Shield`):**
   - **Layer 1 (CDP Fetch Interception - uBlock Origin Style):** Uses Chromium's `Fetch.enable` and `Fetch.requestPaused` protocol domains to block ads at the request stage before any bytes are loaded. Returns custom empty VAST/VPAID response XMLs for stitched player-level ads.
   - **Layer 2 (Network-Level Blocker):** Blocks Amazon ad servers (`amazon-adsystem.com`), telemetry, and tracking networks right at the Chromium network layer (`Network.setBlockedURLs`).
   - **Layer 3 (CSS Banner & Countdown Destroyer):** Permanently removes "Ad 1 of 2", ad countdown banners, and ad overlays (`opacity: 0 !important`).
-  - **Layer 4 (Opaque Ad Cover & Auto-Mute):** During unskippable stitched ad breaks, instantly mutes commercial audio (`video.muted = true`) and hides the ad stream behind an opaque cover overlay. (A `<canvas>` freeze-frame is deliberately NOT used: Prime Video's stream is DRM-protected, so capturing a frame throws a `SecurityError` in every browser.) The shield only engages when a real ad countdown (e.g. `0:27`) is visible, and a 45-second safety valve with a cooldown guarantees a stuck or false detection can never lock normal playback behind the cover.
-  - **Layer 5 (Auto-Skip Clicker & 16x Hyper-Speed):** Automatically clicks "Skip Ad" the millisecond it appears, or accelerates unskippable ads at `16x` speed (`video.playbackRate = 16`) to finish them in seconds before restoring normal playback (`1.2x`).
-- **Smart Auto-Hide During Playback:** Exactly 2 seconds after video playback begins (`play`/`playing`) or the mouse stops moving, the floating button smoothly fades out (`opacity: 0`) for an ultra-clean viewing experience matching native Prime Video controls. Reappears instantly on mouse movement or pause.
+  - **Layer 4 (Opaque Ad Cover & Auto-Mute):** During unskippable stitched ad breaks, instantly mutes commercial audio (`video.muted = true`) and hides the ad stream behind an opaque cover overlay. The shield only engages when a real ad countdown (e.g. `0:27`) is visible, and a 45-second safety valve with a 2-minute cooldown guarantees a stuck or false detection can never lock normal playback behind the cover.
+  - **Layer 5 (Auto-Skip Clicker & 16x Hyper-Speed):** Automatically clicks "Skip Ad" the millisecond it appears, or accelerates unskippable ads at `16x` speed to finish them in seconds before restoring normal playback.
+- **Smart Auto-Hide During Playback:** Exactly 2 seconds after video playback begins or the mouse stops moving, the floating button smoothly fades out for an ultra-clean viewing experience. Reappears instantly on mouse movement or pause.
 - **Compact Icon Indicator:** Displays your current speed and a clean indicator icon:
   - **`1.2x ●`** when custom subtitle styling is ON (the dot glows in your selected subtitle color).
   - **`1.2x ⚡`** when subtitle override is OFF (speed control only).
-- **Custom Taskbar & Window Icon:** Uses Win32 COM (`SHGetPropertyStoreForWindow`) to set `AppUserModelID` (`PrimeVideoSpeedController.App`) exclusively for dedicated `msedge.exe` windows, ensuring clean taskbar grouping.
-- **Multi-layer Subtitle Stabilizer:** Prevents Prime Video from resetting subtitle styles across episodes using `MutationObserver` and dynamic CSS (`!important`).
-- **Two-Section Glassmorphism Menu:** Cleanly separates `⚡ Hız Kontrolü` (Speed Control) and `💬 Altyazı Rengi` (Subtitle Color).
+- **Custom Taskbar & Window Icon:** Uses Win32 COM to set `AppUserModelID` exclusively for dedicated `msedge.exe` windows, ensuring clean taskbar grouping.
+- **Multi-layer Subtitle Customizer:** Fully control how subtitles look:
+  - **Color:** Choose from 5 presets — Yellow (`#FFCC00`), Gold (`#FFD700`), White (`#FFFFFF`), Green (`#00FF66`), Cyan (`#00FFFF`).
+  - **Size:** Type any percentage from **50% to 400%** in the size input and press Enter. Setting is saved across sessions.
+  - **Background:** Cycle through **Shadow** (semi-transparent dark box), **Solid** (opaque black box), and **None** (transparent). Applied via inline style injection to win over Prime Video's own styling.
+  - Persistent across episodes via `MutationObserver` + direct inline style injection.
 - Includes common speed presets: `0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x` and fine adjustments (`+` / `-` from `0.25x` to `4.0x`).
-- Includes 5 preset subtitle colors: **Yellow (`#FFCC00`)**, **Gold (`#FFD700`)**, **White (`#FFFFFF`)**, **Green (`#00FF66`)**, and **Cyan (`#00FFFF`)**.
 - Lets you drag the floating button to a comfortable place on screen.
-- Remembers selected speed, button position, subtitle color, and toggle state locally.
+- Remembers selected speed, button position, subtitle color, size, background, and toggle state locally.
 - Reapplies settings automatically if Prime Video resets the video element or subtitle tracks.
 
 ### What It Does Not Do
@@ -69,15 +71,21 @@ In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC
 
 ### Controls & Shortcuts
 
-- Click the floating button to open or close the menu.
-- Drag the floating button while holding the mouse button to move it.
-- Click any speed preset or use `+` / `-` for `0.1x` speed changes (`0.25x` to `4.0x`).
-- Click the subtitle toggle switch or any color swatch (`Yellow`, `Gold`, `White`, `Green`, `Cyan`).
-- Press `Alt + C` or `Shift + C` to instantly toggle subtitle styling ON/OFF.
-- Press `]` to increase speed by `0.1x`.
-- Press `[` to decrease speed by `0.1x`.
-- Press `\` to reset speed to `1x`.
-- Press `Escape` to close the menu.
+| Action | Method |
+|--------|--------|
+| Open/close menu | Click the floating button |
+| Move button | Click-and-drag the button |
+| Change speed | Click a preset or use `+` / `-` |
+| Change subtitle color | Click a color swatch |
+| Change subtitle size | Type a value (50–400) in the **Size** input and press Enter |
+| Change subtitle background | Click **Bg** to cycle: Shadow → Solid → None |
+| Toggle subtitle styling | Click **Subtitles: ON / OFF** or press `s` |
+| Toggle subtitle (keyboard) | `Alt + C` or `Shift + C` |
+| Speed up +0.1x | `]` or `+` or `↑` |
+| Speed down −0.1x | `[` or `-` or `↓` |
+| Reset speed to 1x | `\` |
+| Skip intro / next episode | `n` |
+| Close menu | `Escape` |
 
 ### Build From Source & Single-File Releases
 
@@ -105,7 +113,9 @@ The app starts Edge with a dedicated local profile and restricts remote debuggin
 The injected script stores only local preferences in `localStorage`:
 - selected playback speed
 - floating button coordinates
-- selected subtitle color and status
+- selected subtitle color, size, and background mode
+- subtitle overlay enabled/disabled state
+- ad statistics (ads blocked count, time saved)
 
 No credentials, cookies, tokens, viewing history, or personal data are collected or transmitted. Strict hexadecimal regex filtering (`/^#[0-9A-Fa-f]{6}$/`) protects against any XSS attempts.
 

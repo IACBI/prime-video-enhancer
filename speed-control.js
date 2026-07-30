@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.4.0") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.4.1") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -560,6 +560,19 @@
     ensureSubtitleStyle();
     if (!subtitleEnabled) return;
 
+    // Resolve the bg value we want to set inline.
+    // Inline styles always beat CSS rules regardless of specificity, so this is
+    // the only reliable way to override Prime Video's own bg injections.
+    let bgValue;
+    if (subtitleBg === "solid") {
+      bgValue = "rgba(0, 0, 0, 0.92)";
+    } else if (subtitleBg === "transparent") {
+      bgValue = "transparent";
+    } else {
+      // shadow (default)
+      bgValue = "rgba(0, 0, 0, 0.48)";
+    }
+
     const subtitleContainers = document.querySelectorAll(
       ".atvwebplayersdk-subtitle-text, .atvwebplayersdk-captions-text, .timedText, .atvwebplayersdk-subtitle-container, .atvwebplayersdk-captions-container"
     );
@@ -567,33 +580,28 @@
     for (const container of subtitleContainers) {
       if (root.contains(container) || container.id === ROOT_ID) continue;
 
-      // Strip any inline background-color Prime Video injects so our CSS can win.
-      // We do NOT use setProperty("important") for bg here — our <style> tag already
-      // has the !important rule; removing the inline style lets it cascade through.
-      if (container instanceof HTMLElement && container.style.backgroundColor) {
-        container.style.removeProperty("background-color");
+      // Apply bg directly on the container itself
+      if (container instanceof HTMLElement) {
+        container.style.setProperty("background-color", bgValue, "important");
+        const inlineColor = container.style.color;
+        if (inlineColor && inlineColor !== subtitleColor) {
+          container.style.setProperty("color", subtitleColor, "important");
+        }
       }
 
       const spans = container.querySelectorAll("span, div, p");
       for (const el of spans) {
         if (root.contains(el)) continue;
-        if (el instanceof HTMLElement) {
-          // Force color override when Prime Video injects its own inline color
-          const inlineColor = el.style.color;
-          if (inlineColor && inlineColor !== subtitleColor) {
-            el.style.setProperty("color", subtitleColor, "important");
-          }
-          // Strip inline background so our <style> bg rule wins
-          if (el.style.backgroundColor) {
-            el.style.removeProperty("background-color");
-          }
-        }
-      }
-      if (container instanceof HTMLElement) {
-        const inlineColor = container.style.color;
+        if (!(el instanceof HTMLElement)) continue;
+
+        // Force color override when Prime Video injects its own inline color
+        const inlineColor = el.style.color;
         if (inlineColor && inlineColor !== subtitleColor) {
-          container.style.setProperty("color", subtitleColor, "important");
+          el.style.setProperty("color", subtitleColor, "important");
         }
+
+        // Apply bg directly — this wins over both inline and CSS-based bg rules
+        el.style.setProperty("background-color", bgValue, "important");
       }
     }
   }
@@ -1388,7 +1396,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.4.0",
+    version: "3.4.1",
     applySpeed,
     refresh,
     applySubtitleStyles,
