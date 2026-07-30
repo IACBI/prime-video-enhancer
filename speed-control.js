@@ -77,7 +77,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.1.0") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.2.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -1164,7 +1164,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.1.0",
+    version: "3.2.0",
     applySpeed,
     refresh,
     applySubtitleStyles,

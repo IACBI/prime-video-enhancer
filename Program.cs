@@ -11,7 +11,7 @@ const string ScriptFileName = "speed-control.js";
 // speed-control.js. If they drift, the already-installed fast check either
 // never matches (wasteful re-injection every poll) or — worse — matches an
 // old script and a fixed speed-control.js is never injected into a running tab.
-const string ScriptVersion = "3.1.0";
+const string ScriptVersion = "3.2.0";
 
 var edgePath = FindEdgePath();
 if (edgePath is null)
