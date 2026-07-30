@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.1") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.2") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -535,11 +535,7 @@
       }
       .atvwebplayersdk-subtitle-text,
       .atvwebplayersdk-captions-text,
-      [class*="subtitle" i],
-      [class*="captions" i],
-      .timedText,
-      [data-testid*="subtitle" i],
-      [class*="Subtitle" i] {
+      .timedText {
         font-size: ${subtitleSize} !important;
       }
       .atvwebplayersdk-subtitle-text span,
@@ -1334,7 +1330,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.3.1",
+    version: "3.3.2",
     applySpeed,
     refresh,
     applySubtitleStyles,
