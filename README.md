@@ -21,14 +21,14 @@ It is built for viewers who want a seamless, commercial-free streaming experienc
 
 Prime Video Speed & Subtitle Controller launches Prime Video in an Edge app-style window and adds a sleek floating button when a real video player is detected. The control stays out of the way, can be dragged to a preferred position, and remembers both your selected playback speed and custom subtitle color preferences locally.
 
-In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 5-Layer Zero-Visibility Ad Shield** that blocks ads at the network request level using Chromium's CDP Fetch interception (similar to uBlock Origin), blocks tracking URLs, and covers unskippable stitched ad segments with an opaque overlay while silently fast-forwarding them at `16x`, ensuring you never see or hear commercials (`Zero-Visibility`). Normal user playback speed customization ranges smoothly from `0.25x` to `4.0x`.
+In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC00`**), this project features an **Always-On 5-Layer Zero-Visibility Ad Shield** that blocks ads at the network request level using Chromium's CDP Fetch interception, blocks tracking URLs, and covers unskippable stitched ad segments with an opaque overlay while silently fast-forwarding them at `16x`, ensuring you never see or hear commercials (`Zero-Visibility`). Normal user playback speed customization ranges smoothly from `0.25x` to `4.0x`.
 
 ### Features
 
 - Opens Prime Video in a dedicated Microsoft Edge app window (`--remote-debugging-address=127.0.0.1`).
 - Shows the speed & subtitle control only when video playback is available.
 - **Always-On 5-Layer Zero-Visibility Ad Shield (`🛡️ Ad Shield`):**
-  - **Layer 1 (CDP Fetch Interception - uBlock Origin Style):** Uses Chromium's `Fetch.enable` and `Fetch.requestPaused` protocol domains to block ads at the request stage before any bytes are loaded. Returns custom empty VAST/VPAID response XMLs for stitched player-level ads.
+  - **Layer 1 (CDP Fetch Interception):** Uses Chromium's `Fetch.enable` and `Fetch.requestPaused` protocol domains to block ads at the request stage before any bytes are loaded. Returns custom empty VAST/VPAID response XMLs for stitched player-level ads.
   - **Layer 2 (Network-Level Blocker):** Blocks Amazon ad servers (`amazon-adsystem.com`), telemetry, and tracking networks right at the Chromium network layer (`Network.setBlockedURLs`).
   - **Layer 3 (CSS Banner & Countdown Destroyer):** Permanently removes "Ad 1 of 2", ad countdown banners, and ad overlays (`opacity: 0 !important`).
   - **Layer 4 (Opaque Ad Cover & Auto-Mute):** During unskippable stitched ad breaks, instantly mutes commercial audio (`video.muted = true`) and hides the ad stream behind an opaque cover overlay. The shield only engages when a real ad countdown (e.g. `0:27`) is visible, and a 45-second safety valve with a 2-minute cooldown guarantees a stuck or false detection can never lock normal playback behind the cover.
@@ -132,14 +132,14 @@ Released under the MIT License. See [LICENSE](LICENSE).
 
 Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde özel bir uygulama penceresinde açan ve ekranda gerçek bir video oynatıcı algılandığında zarif, kaydırılabilir bir buton gösteren açık kaynaklı ve hafif bir Windows aracıdır. Bu kontrol butonu izleme keyfinizi bölmez, ekranda dilediğiniz konuma taşınabilir ve seçtiğiniz oynatma hızı, altyazı rengi, altyazı boyutu ve arka plan stili tercihlerinizi yerel olarak hatırlar.
 
-Çok katmanlı altyazı özelleştiricisine ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü (uBlock Origin tarzı) aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamları opak bir perde arkasında 16x hiper sessiz hızda eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
+Çok katmanlı altyazı özelleştiricisine ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamları opak bir perde arkasında 16x hiper sessiz hızda eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
 
 ### Özellikler
 
 - Prime Video'yu özel ve yerel bir Microsoft Edge penceresinde açar (`--remote-debugging-address=127.0.0.1`).
 - Hız ve altyazı butonunu (`1.2x ●` / `1.2x ⚡`) sadece video oynatımı hazır olduğunda gösterir.
 - **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (`🛡️ Reklam Kalkanı`):**
-  - **Katman 1 (CDP Fetch İstek Kesicisi - uBlock Origin Tarzı):** Chromium'un `Fetch.enable` ve `Fetch.requestPaused` protokol etki alanlarını kullanarak, reklam dosyalarının byte'ları daha yüklenmeye başlamadan istek aşamasında bloke eder. Oynatıcı düzeyinde gömülü reklamlar için boş VAST/VPAID XML yanıtı döner.
+  - **Katman 1 (CDP Fetch İstek Kesicisi):** Chromium'un `Fetch.enable` ve `Fetch.requestPaused` protokol etki alanlarını kullanarak, reklam dosyalarının byte'ları daha yüklenmeye başlamadan istek aşamasında bloke eder. Oynatıcı düzeyinde gömülü reklamlar için boş VAST/VPAID XML yanıtı döner.
   - **Katman 2 (Ağ Reklam ve Takipçi Engelleyici):** Amazon reklam sunucularını (`amazon-adsystem.com`), telemetri ve takip ağlarını doğrudan Chromium ağ katmanında engeller (`Network.setBlockedURLs`).
   - **Katman 3 (CSS Banner ve Geri Sayım Yok Edici):** "Reklam 1/2" uyarılarını, reklam sayacı banner'larını ve katmanlarını tamamen görünmez yapar (`opacity: 0 !important`).
   - **Katman 4 (Opak Reklam Perdesi ve Otomatik Sessize Alma):** Atlanamayan zorunlu gömülü reklam aralarında ses otomatik kesilir (`video.muted = true`) ve reklam akışı opak bir perde ile gizlenir. Kalkan yalnızca gerçek bir reklam geri sayımı (örn. `0:27`) görünürken devreye girer; 45 saniyelik emniyet valfi ve 2 dakikalık bekleme süresi, takılı veya hatalı bir algılamanın normal izlemeyi asla perde arkasına kilitleyememesini garanti eder.
@@ -243,14 +243,14 @@ MIT Lisansı altında yayınlanmıştır. Ayrıntılar için [LICENSE](LICENSE) 
 
 Prime Video Speed & Subtitle Controller es una herramienta ligera y de código abierto para Windows que abre Prime Video en una ventana dedicada de Microsoft Edge y añade un botón flotante cuando se detecta el reproductor de vídeo. Este control no molesta, se puede arrastrar a cualquier parte de la pantalla y recuerda localmente tu velocidad de reproducción, color, tamaño y fondo de subtítulos preferidos.
 
-Además de la personalización avanzada de subtítulos, este proyecto incluye un **Escudo de Anuncios de 5 Capas (Zero-Visibility Ad Shield)** que bloquea servidores de publicidad a nivel de red (`Network.setBlockedURLs`), intercepta solicitudes en la fase de petición mediante CDP Fetch (estilo uBlock Origin) y silencia las pausas publicitarias obligatorias avanzando a velocidad ultrarrápida `16x` tras una cubierta opaca. La velocidad de reproducción normal para el usuario se ajusta libremente desde `0.25x` hasta `4.0x`.
+Además de la personalización avanzada de subtítulos, este proyecto incluye un **Escudo de Anuncios de 5 Capas (Zero-Visibility Ad Shield)** que bloquea servidores de publicidad a nivel de red (`Network.setBlockedURLs`), intercepta solicitudes en la fase de petición mediante CDP Fetch y silencia las pausas publicitarias obligatorias avanzando a velocidad ultrarrápida `16x` tras una cubierta opaca. La velocidad de reproducción normal para el usuario se ajusta libremente desde `0.25x` hasta `4.0x`.
 
 ### Funciones
 
 - Abre Prime Video en una ventana dedicada de Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Muestra el control flotante (`1.2x ●` / `1.2x ⚡`) únicamente durante la reproducción de vídeo.
 - **Escudo de Anuncios de 5 Capas (`🛡️ Reklam Kalkanı`):**
-  - **Capa 1 (Intercepción CDP Fetch - estilo uBlock Origin):** Bloquea los anuncios en la fase de solicitud antes de que se cargue un solo byte. Devuelve respuestas XML VAST/VPAID vacías para anuncios integrados.
+  - **Capa 1 (Intercepción CDP Fetch):** Bloquea los anuncios en la fase de solicitud antes de que se cargue un solo byte. Devuelve respuestas XML VAST/VPAID vacías para anuncios integrados.
   - **Capa 2 (Bloqueo de Red y Rastreadores):** Bloquea servidores de publicidad de Amazon (`amazon-adsystem.com`), telemetría y rastreadores (`Network.setBlockedURLs`).
   - **Capa 3 (Destrucción de Banners y Contadores CSS):** Oculta permanentemente avisos de "Anuncio 1 de 2", banners temporizadores y superposiciones (`opacity: 0 !important`).
   - **Capa 4 (Cubierta Opaca de Anuncios y Silencio Automático):** Silencia el audio (`video.muted = true`) y cubre el vídeo con una capa oscura. La válvula de seguridad de 45 segundos y el enfriamiento de 2 minutos garantizan que las falsas detecciones nunca bloqueen la reproducción normal.
@@ -352,14 +352,14 @@ Publicado bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más
 
 Prime Video Speed & Subtitle Controller ist ein leichtgewichtiges Open-Source-Hilfsprogramm für Windows, das Prime Video in einem dedizierten Microsoft-Edge-Appfenster startet und einen eleganten, verschiebbaren Button einblendet, sobald ein Videoplayer erkannt wird. Die Steuerung bleibt unaufdringlich, lässt sich frei auf dem Bildschirm platzieren und speichert Ihre bevorzugte Wiedergabegeschwindigkeit, Untertitelfarbe, -größe und den -hintergrund lokal ab.
 
-Zusätzlich zur erweiterten Untertitel-Anpassung bietet dieses Projekt einen **5-stufigen Werbeschutz (Zero-Visibility Ad Shield)**, der Werbe-Tracker auf Netzwerkebene (`Network.setBlockedURLs`) blockiert, Anfragen über CDP Fetch abfängt (uBlock-Origin-Stil) und unüberspringbare Werbung stummschaltet und beschleunigt. Die reguläre Wiedergabegeschwindigkeit lässt sich flexibel zwischen `0.25x` und `4.0x` anpassen.
+Zusätzlich zur erweiterten Untertitel-Anpassung bietet dieses Projekt einen **5-stufigen Werbeschutz (Zero-Visibility Ad Shield)**, der Werbe-Tracker auf Netzwerkebene (`Network.setBlockedURLs`) blockiert, Anfragen über CDP Fetch abfängt und unüberspringbare Werbung stummschaltet und beschleunigt. Die reguläre Wiedergabegeschwindigkeit lässt sich flexibel zwischen `0.25x` und `4.0x` anpassen.
 
 ### Funktionen
 
 - Öffnet Prime Video in einem dedizierten Microsoft-Edge-Fenster (`--remote-debugging-address=127.0.0.1`).
 - Zeigt den Geschwindigkeits- & Untertitelbutton (`1.2x ●` / `1.2x ⚡`) nur während der Videowiedergabe an.
 - **5-stufiger Werbeschutz (`🛡️ Reklam Kalkanı`):**
-  - **Stufe 1 (CDP-Fetch-Abfangen – uBlock-Origin-Stil):** Blockiert Werbung in der Anfragephase vor dem Laden. Liefert leere VAST/VPAID-XML-Antworten.
+  - **Stufe 1 (CDP-Fetch-Abfangen):** Blockiert Werbung in der Anfragephase vor dem Laden. Liefert leere VAST/VPAID-XML-Antworten.
   - **Stufe 2 (Netzwerk- & Tracker-Blocker):** Blockiert Amazon-Werbeserver (`amazon-adsystem.com`), Telemetrie und Tracking-Netzwerke (`Network.setBlockedURLs`).
   - **Stufe 3 (CSS-Banner & Countdown-Zerstörer):** Entfernt „Werbung 1 von 2“-Hinweise und Overlays dauerhaft (`opacity: 0 !important`).
   - **Stufe 4 (Abdeckung & Auto-Stummschaltung):** Schaltet den Ton während Werbung stumm und deckt das Bild ab. Ein 45-Sekunden-Sicherheitsventil verhindert Fehlauslösungen.
@@ -461,14 +461,14 @@ Veröffentlicht unter der MIT-Lizenz. Weitere Informationen finden Sie unter [LI
 
 Prime Video Speed & Subtitle Controller est un utilitaire léger et open-source pour Windows qui lance Prime Video dans une fenêtre Microsoft Edge dédiée et affiche un bouton flottant élégant lorsqu'un lecteur vidéo est détecté. Ce contrôle reste discret, peut être glissé à n'importe quel endroit de l'écran et mémorise localement votre vitesse de lecture ainsi que vos préférences de couleur, taille et fond des sous-titres.
 
-En plus de la personnalisation avancée des sous-titres, ce projet intègre un **Bouclier Anti-Pub à 5 Niveaux (Zero-Visibility Ad Shield)** qui bloque les serveurs publicitaires sur le réseau (`Network.setBlockedURLs`), intercepte les requêtes via CDP Fetch (style uBlock Origin) et coupe le son des publicités obligatoires en les accélérant à vitesse `16x`. La vitesse de lecture normale par l'utilisateur s'étend de `0.25x` à `4.0x`.
+En plus de la personnalisation avancée des sous-titres, ce projet intègre un **Bouclier Anti-Pub à 5 Niveaux (Zero-Visibility Ad Shield)** qui bloque les serveurs publicitaires sur le réseau (`Network.setBlockedURLs`), intercepte les requêtes via CDP Fetch et coupe le son des publicités obligatoires en les accélérant à vitesse `16x`. La vitesse de lecture normale par l'utilisateur s'étend de `0.25x` à `4.0x`.
 
 ### Fonctionnalités
 
 - Ouvre Prime Video dans une fenêtre Microsoft Edge dédiée (`--remote-debugging-address=127.0.0.1`).
 - Affiche le bouton de contrôle (`1.2x ●` / `1.2x ⚡`) uniquement lorsque la vidéo est disponible.
 - **Bouclier Anti-Pub à 5 Niveaux (`🛡️ Reklam Kalkanı`):**
-  - **Niveau 1 (Interception CDP Fetch - style uBlock Origin):** Bloque les publicités dès la phase de requête avant tout chargement.
+  - **Niveau 1 (Interception CDP Fetch):** Bloque les publicités dès la phase de requête avant tout chargement.
   - **Niveau 2 (Blocage Réseau et Traqueurs):** Bloque les serveurs publicitaires d'Amazon (`amazon-adsystem.com`), la télémétrie et les traqueurs (`Network.setBlockedURLs`).
   - **Niveau 3 (Suppression des Bannières et Comptes à Rebours):** Masque définitivement les bannières et superpositions (`opacity: 0 !important`).
   - **Niveau 4 (Couverture Opaque et Silencieux Automatique):** Coupe le son (`video.muted = true`) et masque la vidéo. Une soupape de sécurité de 45s empêche les faux positifs.
@@ -577,7 +577,7 @@ Além da personalização avançada de legendas, este projeto possui um **Escudo
 - Abre o Prime Video em uma janela dedicada do Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Exibe o controle flutuante (`1.2x ●` / `1.2x ⚡`) exclusivamente durante a reprodução de vídeo.
 - **Escudo de 5 Camadas de Zero Visibilidade (`🛡️ Reklam Kalkanı`):**
-  - **Camada 1 (Interceptação CDP Fetch - estilo uBlock Origin):** Bloqueia anúncios antes de qualquer carregamento.
+  - **Camada 1 (Interceptação CDP Fetch):** Bloqueia anúncios antes de qualquer carregamento.
   - **Camada 2 (Bloqueador de Rede e Rastreadores):** Bloqueia servidores de anúncios da Amazon (`amazon-adsystem.com`), telemetria e rastreadores (`Network.setBlockedURLs`).
   - **Camada 3 (Destruidor de Banners e Contadores CSS):** Oculta permanentemente banners e sobreposições (`opacity: 0 !important`).
   - **Camada 4 (Cobertura Opaca e Silenciamento Automático):** Silencia o áudio (`video.muted = true`) e cobre o vídeo. Uma válvula de segurança de 45s evita falsos positivos.
@@ -686,7 +686,7 @@ Prime Video Speed & Subtitle Controller 是一个开源、轻量级的 Windows �
 - 在专用的 Microsoft Edge 独立窗口 (`--remote-debugging-address=127.0.0.1`) 中打开 Prime Video。
 - 仅在视频播放器准备就绪时显示悬浮按钮 (`1.2x ●` / `1.2x ⚡`)。
 - **5层零可见广告屏蔽盾 (`🛡️ Reklam Kalkanı`):**
-  - **第 1 层 (CDP Fetch 请求拦截 - uBlock Origin 风格):** 在请求阶段拦截广告，返回空的 VAST/VPAID XML 响应。
+  - **第 1 层 (CDP Fetch 请求拦截):** 在请求阶段拦截广告，返回空的 VAST/VPAID XML 响应。
   - **第 2 层 (网络广告与跟踪拦截):** 拦截 Amazon 广告服务器 (`amazon-adsystem.com`)、遥测及追踪请求 (`Network.setBlockedURLs`)。
   - **第 3 层 (CSS 广告横幅消灭):** 永久隐藏“广告 1/2”倒计时提示及弹窗 (`opacity: 0 !important`)。
   - **第 4 层 (不透明遮罩与自动静音):** 遇到强制广告时自动静音 (`video.muted = true`) 并遮挡画面。45 秒安全阀门防误判。
