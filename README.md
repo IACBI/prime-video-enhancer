@@ -130,9 +130,9 @@ Released under the MIT License. See [LICENSE](LICENSE).
 
 ### Genel Bakış
 
-Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde özel bir uygulama penceresinde açan ve ekranda gerçek bir video oynatıcı algılandığında zarif, kaydırılabilir bir buton gösteren açık kaynaklı ve hafif bir Windows aracıdır. Bu kontrol butonu izleme keyfinizi bölmez, ekranda dilediğiniz konuma taşınabilir ve seçtiğiniz oynatma hızı ile altyazı rengi tercihlerinizi yerel olarak hatırlar.
+Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde özel bir uygulama penceresinde açan ve ekranda gerçek bir video oynatıcı algılandığında zarif, kaydırılabilir bir buton gösteren açık kaynaklı ve hafif bir Windows aracıdır. Bu kontrol butonu izleme keyfinizi bölmez, ekranda dilediğiniz konuma taşınabilir ve seçtiğiniz oynatma hızı, altyazı rengi, altyazı boyutu ve arka plan stili tercihlerinizi yerel olarak hatırlar.
 
-Çok katmanlı altyazı sabitleyicisine (varsayılan olarak **Sarı `#FFCC00`**) ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü (uBlock Origin tarzı) aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamları opak bir perde arkasında 16x hiper sessiz hızda eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
+Çok katmanlı altyazı özelleştiricisine ek olarak, projemizde entegre bir **5 Katmanlı Sıfır Görünürlük Reklam Kalkanı (Zero-Visibility Ad Shield)** yer alır. Bu kalkan, reklam sunucu isteklerini doğrudan ağ isteği seviyesinde Chromium CDP Fetch protokolü (uBlock Origin tarzı) aracılığıyla engelleyip, diğer takip ağlarını engeller ve atlanamayan reklamları opak bir perde arkasında 16x hiper sessiz hızda eritir (`Zero-Visibility`). Kullanıcının normal izleme hızı ise serbestçe `0.25x` ile `4.0x` arasında ayarlanabilir.
 
 ### Özellikler
 
@@ -142,19 +142,21 @@ Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde
   - **Katman 1 (CDP Fetch İstek Kesicisi - uBlock Origin Tarzı):** Chromium'un `Fetch.enable` ve `Fetch.requestPaused` protokol etki alanlarını kullanarak, reklam dosyalarının byte'ları daha yüklenmeye başlamadan istek aşamasında bloke eder. Oynatıcı düzeyinde gömülü reklamlar için boş VAST/VPAID XML yanıtı döner.
   - **Katman 2 (Ağ Reklam ve Takipçi Engelleyici):** Amazon reklam sunucularını (`amazon-adsystem.com`), telemetri ve takip ağlarını doğrudan Chromium ağ katmanında engeller (`Network.setBlockedURLs`).
   - **Katman 3 (CSS Banner ve Geri Sayım Yok Edici):** "Reklam 1/2" uyarılarını, reklam sayacı banner'larını ve katmanlarını tamamen görünmez yapar (`opacity: 0 !important`).
-  - **Katman 4 (Opak Reklam Perdesi ve Otomatik Sessize Alma):** Atlanamayan zorunlu gömülü reklam aralarında ses otomatik kesilir (`video.muted = true`) ve reklam akışı opak bir perde ile gizlenir. (`canvas` tabanlı kare dondurma bilinçli olarak kullanılmaz: Prime Video akışı DRM korumalıdır ve kare yakalamak her tarayıcıda `SecurityError` fırlatır.) Kalkan yalnızca gerçek bir reklam geri sayımı (örn. `0:27`) görünürken devreye girer; 45 saniyelik emniyet valfi ve sonrasındaki bekleme süresi, takılı veya hatalı bir algılamanın normal izlemeyi asla perde arkasına kilitleyememesini garanti eder.
-  - **Katman 5 (Otomatik Skip ve 16x Hiper Hız):** "Reklamı Atla / Skip Ad" butonu çıktığı milisaniye otomatik tıklanır. Atlanamayan reklamlarda ise video `16x` hiper hıza (`video.playbackRate = 16`) alınarak birkaç saniyede aşılır ve asıl içerik normal hızda (`1.2x`) pürüzsüzce geri gelir.
-- **Akıllı Otomatik Gizleme (Auto-Hide):** Video oynatımı başladıktan tam 2 saniye sonra veya fare hareketsiz kaldığında, buton yumuşak bir animasyonla ekrandan kaybolur (`opacity: 0`) ve tertemiz sinematik bir ekran sunar. Fare hareketinde anında görünür hale gelir.
+  - **Katman 4 (Opak Reklam Perdesi ve Otomatik Sessize Alma):** Atlanamayan zorunlu gömülü reklam aralarında ses otomatik kesilir (`video.muted = true`) ve reklam akışı opak bir perde ile gizlenir. Kalkan yalnızca gerçek bir reklam geri sayımı (örn. `0:27`) görünürken devreye girer; 45 saniyelik emniyet valfi ve 2 dakikalık bekleme süresi, takılı veya hatalı bir algılamanın normal izlemeyi asla perde arkasına kilitleyememesini garanti eder.
+  - **Katman 5 (Otomatik Skip ve 16x Hiper Hız):** "Reklamı Atla / Skip Ad" butonu çıktığı milisaniye otomatik tıklanır. Atlanamayan reklamlarda ise video `16x` hiper hıza alınarak birkaç saniyede aşılır ve asıl içerik normal hızda pürüzsüzce geri gelir.
+- **Akıllı Otomatik Gizleme (Auto-Hide):** Video oynatımı başladıktan tam 2 saniye sonra veya fare hareketsiz kaldığında, buton yumuşak bir animasyonla ekrandan kaybolur ve tertemiz sinematik bir ekran sunar. Fare hareketinde veya duraklatıldığında anında görünür hale gelir.
 - **Kompakt Durum İkonu:** Mevcut hızı ve aktif modu simgeyle gösterir:
-  - **`1.2x ●`** altyazı renklendirmesi AÇIK olduğunda (nokta seçilen altyazı renginde parlar).
-  - **`1.2x ⚡`** altyazı sabitleyici KAPALI olduğunda (sadece hız kontrolü aktif).
-- **Özel Görev Çubuğu ve Pencere İkonu:** Win32 COM arayüzü (`SHGetPropertyStoreForWindow`) kullanılarak sadece adanmış `msedge.exe` pencerelerine `AppUserModelID` (`PrimeVideoSpeedController.App`) atanır ve görev çubuğunda kusursuz bir gruplama sağlanır.
-- **Çok Katmanlı Altyazı Sabitleyici:** `MutationObserver` ve `!important` CSS kuralları ile Prime Video'nun bölüm geçişlerinde altyazı rengini sıfırlamasını engeller.
-- **İki Bölümlü Cam Efektli Menü:** `⚡ Hız Kontrolü` ve `💬 Altyazı Rengi` sekmelerini net şekilde ayırır.
+  - **`1.2x ●`** altyazı özelleştirmesi AÇIK olduğunda (nokta seçilen altyazı renginde parlar).
+  - **`1.2x ⚡`** altyazı özelleştirmesi KAPALI olduğunda (sadece hız kontrolü aktif).
+- **Özel Görev Çubuğu ve Pencere İkonu:** Win32 COM arayüzü kullanılarak sadece adanmış `msedge.exe` pencerelerine `AppUserModelID` (`PrimeVideoSpeedController.App`) atanır ve görev çubuğunda kusursuz bir gruplama sağlanır.
+- **Gelişmiş Altyazı Özelleştirici:**
+  - **Renk:** 5 renk önayarı — Sarı (`#FFCC00`), Altın (`#FFD700`), Beyaz (`#FFFFFF`), Yeşil (`#00FF66`), Mavi (`#00FFFF`).
+  - **Boyut:** **Boyut (Size)** kutusuna **%50 ile %400** arasında istenilen yüzde değeri yazılıp Enter'a basılabilir.
+  - **Arka Plan:** **Bg** butonuna basılarak arka plan modu seçilebilir: **Shadow** (yarı saydam koyu kutu), **Solid** (opak siyah kutu), **None** (şeffaf). Doğrudan inline style enjeksiyonu ile Prime Video'nun kendi stillerini kesinlikle ezer.
+  - `MutationObserver` ve doğrudan inline style enjeksiyonu sayesinde bölüm geçişlerinde ve DOM yenilenmelerinde ayarlarınız korunur.
 - Yaygın hız önayarlarını (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) ve hassas adım butonlarını (`+` / `-` ile `0.25x` - `4.0x`) içerir.
-- 5 hazır altyazı rengi sunar: **Sarı (`#FFCC00`)**, **Altın (`#FFD700`)**, **Beyaz (`#FFFFFF`)**, **Yeşil (`#00FF66`)** ve **Mavi (`#00FFFF`)**.
 - Buton sürüklenerek ekranda istenilen yere taşınabilir.
-- Tercihleri (hız, konum, renk, açık/kapalı durumu) yerel olarak `localStorage` üzerinde saklar.
+- Tercihleri (hız, konum, renk, boyut, arka plan, açık/kapalı durumu) yerel olarak `localStorage` üzerinde saklar.
 - Oynatıcı veya altyazı parçası yenilendiğinde tercihleri anında yeniden uygular.
 
 ### Ne Yapmaz
@@ -176,19 +178,25 @@ Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde
 2. `run.cmd` dosyasını çalıştırın.
 3. Açılan özel Edge penceresinde Prime Video hesabınıza giriş yapın.
 4. Dilediğiniz bir film veya diziyi başlatın.
-5. Ekranda beliren `1.2x ●` butonuna tıklayarak hızınızı veya altyazı renginizi seçin. Reklamsız keyfin tadını çıkarın!
+5. Ekranda beliren `1.2x ●` butonuna tıklayarak hızınızı veya altyazı ayarlarınızı seçin. Reklamsız keyfin tadını çıkarın!
 
 ### Kontroller ve Kısayollar
 
-- Menüyü açmak veya kapatmak için yüzen butona tıklayın.
-- Butonu ekranda taşımak için farenin sol tuşuna basılı tutarak sürükleyin.
-- Hız önayarlarına tıklayın veya `+` / `-` ile `0.1x` hassas adımlarla (`0.25x` ile `4.0x` arasında) hızı değiştirin.
-- Altyazı anahtarına veya renk şeritlerine (`Sarı`, `Altın`, `Beyaz`, `Yeşil`, `Mavi`) tıklayın.
-- Altyazı modunu anında açıp kapatmak için `Alt + C` veya `Shift + C` tuşlarına basın.
-- Hızı `0.1x` artırmak için `]` tuşuna basın.
-- Hızı `0.1x` azaltmak için `[` tuşuna basın.
-- Hızı `1x` (varsayılan) düzeyine sıfırlamak için `\` tuşuna basın.
-- Menüyü kapatmak için `Escape` tuşuna basın.
+| Eylem | Yöntem |
+|-------|--------|
+| Menüyü aç / kapat | Yüzen butona tıklayın |
+| Butonu taşı | Butona basılı tutup sürükleyin |
+| Hız değiştir | Önayarlara tıklayın veya `+` / `-` kullanın |
+| Altyazı rengi değiştir | Bir renk dairesine tıklayın |
+| Altyazı boyutu değiştir | **Size** kutusuna %50–400 arası değer girip Enter'a basın |
+| Altyazı arka planı değiştir | **Bg** butonuna tıklayarak geçiş yapın: Shadow → Solid → None |
+| Altyazı özelleştirmeyi aç/kapat | **Subtitles: ON / OFF** butonuna tıklayın veya `s` tuşuna basın |
+| Altyazı modu (klavye) | `Alt + C` veya `Shift + C` |
+| Hızı +0.1x artır | `]` veya `+` veya `↑` |
+| Hızı −0.1x azalt | `[` veya `-` veya `↓` |
+| Hızı 1x yap (sıfırla) | `\` |
+| İntroyu / sonraki bölümü atla | `n` |
+| Menüyü kapat | `Escape` |
 
 ### Kaynaktan Derleme ve Tek Dosyalı Sürümler
 
@@ -216,7 +224,9 @@ Uygulama, Edge tarayıcısını tamamen izole bir yerel profille başlatır ve u
 Enjekte edilen kod, yalnızca yerel tarayıcı hafızasına (`localStorage`) şu tercihleri kaydeder:
 - seçilen izleme hızı
 - buton ekran koordinatları
-- seçilen altyazı rengi ve aktiflik durumu
+- seçilen altyazı rengi, boyutu (%50-400) ve arka plan modu
+- altyazı özelleştirme aktiflik durumu
+- engellenen reklam istatistikleri (sayı ve tasarruf edilen süre)
 
 Hiçbir hesap bilgisi, çerez, token veya kişisel veri toplanmaz ve dışarı aktarılmaz. Katı Hex regex denetimi (`/^#[0-9A-Fa-f]{6}$/`) olası tüm XSS saldırılarını sıfır hata ile engeller.
 
