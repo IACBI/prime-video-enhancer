@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.3") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.4") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -535,18 +535,16 @@
       }
       .atvwebplayersdk-subtitle-text,
       .atvwebplayersdk-captions-text,
+      .atvwebplayersdk-subtitle-container > div,
+      .atvwebplayersdk-captions-container > div,
       .timedText {
         font-size: ${subtitleSize} !important;
       }
       .atvwebplayersdk-subtitle-text span,
       .atvwebplayersdk-captions-text span,
-      [class*="subtitle" i] span,
-      [class*="captions" i] span,
-      .timedText span,
-      [data-testid*="subtitle" i] span,
-      [class*="Subtitle" i] span,
       .atvwebplayersdk-subtitle-container span,
-      .atvwebplayersdk-captions-container span {
+      .atvwebplayersdk-captions-container span,
+      .timedText span {
         color: ${subtitleColor} !important;
         font-weight: 700 !important;
         ${bgStyle}
@@ -562,7 +560,7 @@
     ensureSubtitleStyle();
 
     const subtitleContainers = document.querySelectorAll(
-      ".atvwebplayersdk-subtitle-text, .atvwebplayersdk-captions-text, .timedText, [class*='subtitle' i], [class*='captions' i], [data-testid*='subtitle' i]"
+      ".atvwebplayersdk-subtitle-text, .atvwebplayersdk-captions-text, .timedText, .atvwebplayersdk-subtitle-container, .atvwebplayersdk-captions-container"
     );
 
     for (const container of subtitleContainers) {
@@ -1330,7 +1328,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.3.3",
+    version: "3.3.4",
     applySpeed,
     refresh,
     applySubtitleStyles,
