@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.2") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.3") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -113,7 +113,7 @@
   }
 
   let subtitleEnabled = window.localStorage.getItem(SUBTITLE_ENABLED_KEY) !== "false";
-  let subtitleSize = window.localStorage.getItem(SUBTITLE_SIZE_KEY) || "100%";
+  let subtitleSize = window.localStorage.getItem(SUBTITLE_SIZE_KEY) || "150%";
   let subtitleBg = window.localStorage.getItem(SUBTITLE_BG_KEY) || "shadow"; // transparent, shadow, solid
   
   let adsBlockedCount = parseInt(window.localStorage.getItem(ADS_BLOCKED_KEY) || "0", 10);
@@ -680,10 +680,10 @@
   }
 
   function cycleSubtitleSize() {
-    if (subtitleSize === "70%") subtitleSize = "100%";
-    else if (subtitleSize === "100%") subtitleSize = "130%";
-    else if (subtitleSize === "130%") subtitleSize = "160%";
-    else subtitleSize = "70%";
+    if (subtitleSize === "100%") subtitleSize = "150%";
+    else if (subtitleSize === "150%") subtitleSize = "200%";
+    else if (subtitleSize === "200%") subtitleSize = "250%";
+    else subtitleSize = "100%";
     window.localStorage.setItem(SUBTITLE_SIZE_KEY, subtitleSize);
     ensureSubtitleStyle();
     applySubtitleStyles();
@@ -1036,9 +1036,9 @@
     const sizeBtn = document.getElementById("pvsc-btn-subsize");
     if (sizeBtn) {
       let sizeLabel = "Normal";
-      if (subtitleSize === "70%") sizeLabel = "Small";
-      if (subtitleSize === "130%") sizeLabel = "Large";
-      if (subtitleSize === "160%") sizeLabel = "Huge";
+      if (subtitleSize === "100%" || subtitleSize === "70%") sizeLabel = "Small";
+      else if (subtitleSize === "200%" || subtitleSize === "130%") sizeLabel = "Large";
+      else if (subtitleSize === "250%" || subtitleSize === "160%") sizeLabel = "Huge";
       sizeBtn.textContent = "Size: " + sizeLabel;
     }
 
@@ -1330,7 +1330,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.3.2",
+    version: "3.3.3",
     applySpeed,
     refresh,
     applySubtitleStyles,
