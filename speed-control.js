@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.0") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.3.1") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -161,7 +161,7 @@
   function updateStatsDisplay() {
     const statsEl = document.getElementById("pvsc-stats-text");
     if (statsEl) {
-      statsEl.textContent = `🛡️ ${adsBlockedCount} reklam engellendi (~${Math.floor(adsTimeSavedSecs / 60)} dk tasarruf)`;
+      statsEl.textContent = `🛡️ ${adsBlockedCount} ads blocked (~${Math.floor(adsTimeSavedSecs / 60)}m saved)`;
     }
   }
 
@@ -533,6 +533,15 @@
         ${bgStyle}
         ${shadowStyle}
       }
+      .atvwebplayersdk-subtitle-text,
+      .atvwebplayersdk-captions-text,
+      [class*="subtitle" i],
+      [class*="captions" i],
+      .timedText,
+      [data-testid*="subtitle" i],
+      [class*="Subtitle" i] {
+        font-size: ${subtitleSize} !important;
+      }
       .atvwebplayersdk-subtitle-text span,
       .atvwebplayersdk-captions-text span,
       [class*="subtitle" i] span,
@@ -543,7 +552,6 @@
       .atvwebplayersdk-subtitle-container span,
       .atvwebplayersdk-captions-container span {
         color: ${subtitleColor} !important;
-        font-size: ${subtitleSize} !important;
         font-weight: 700 !important;
         ${bgStyle}
         ${shadowStyle}
@@ -968,6 +976,8 @@
     }
   }
 
+  let lastKnownMenuPos = null;
+
   function placeNearCloseButton(closeButton) {
     if (readSavedPosition()) {
       return;
@@ -983,7 +993,8 @@
       left = closeRect.left - width - 10;
     }
 
-    setPosition(left, closeRect.top + (closeRect.height - height) / 2, false);
+    lastKnownMenuPos = { left, top: closeRect.top + (closeRect.height - height) / 2 };
+    setPosition(lastKnownMenuPos.left, lastKnownMenuPos.top, false);
   }
 
   function refresh() {
@@ -1004,7 +1015,11 @@
     if (closeButton) {
       placeNearCloseButton(closeButton);
     } else if (!readSavedPosition()) {
-      setPosition(window.innerWidth - 76, 78, false);
+      if (lastKnownMenuPos) {
+        setPosition(lastKnownMenuPos.left, lastKnownMenuPos.top, false);
+      } else {
+        setPosition(window.innerWidth - 76, 78, false);
+      }
     }
 
     updateSubtitleObserver();
@@ -1019,24 +1034,24 @@
 
     if (subtitleToggleBtn) {
       subtitleToggleBtn.classList.toggle("pvsc-toggle-on", subtitleEnabled);
-      subtitleToggleBtn.textContent = subtitleEnabled ? "Altyazı: Açık ✓" : "Altyazı: Kapalı";
+      subtitleToggleBtn.textContent = subtitleEnabled ? "Subtitles: ON ✓" : "Subtitles: OFF";
     }
 
     const sizeBtn = document.getElementById("pvsc-btn-subsize");
     if (sizeBtn) {
       let sizeLabel = "Normal";
-      if (subtitleSize === "70%") sizeLabel = "Küçük";
-      if (subtitleSize === "130%") sizeLabel = "Büyük";
-      if (subtitleSize === "160%") sizeLabel = "Dev";
-      sizeBtn.textContent = "Boyut: " + sizeLabel;
+      if (subtitleSize === "70%") sizeLabel = "Small";
+      if (subtitleSize === "130%") sizeLabel = "Large";
+      if (subtitleSize === "160%") sizeLabel = "Huge";
+      sizeBtn.textContent = "Size: " + sizeLabel;
     }
 
     const bgBtn = document.getElementById("pvsc-btn-subbg");
     if (bgBtn) {
-      let bgLabel = "Gölge";
-      if (subtitleBg === "solid") bgLabel = "Siyah";
-      if (subtitleBg === "transparent") bgLabel = "Şeffaf";
-      bgBtn.textContent = "Arkaplan: " + bgLabel;
+      let bgLabel = "Shadow";
+      if (subtitleBg === "solid") bgLabel = "Solid";
+      if (subtitleBg === "transparent") bgLabel = "None";
+      bgBtn.textContent = "Bg: " + bgLabel;
     }
 
     for (const swatch of menu.querySelectorAll("[data-color]")) {
@@ -1107,7 +1122,7 @@
 
   const speedTitle = document.createElement("div");
   speedTitle.className = "pvsc-section-title";
-  speedTitle.textContent = "⚡ Hız Kontrolü";
+  speedTitle.textContent = "⚡ Speed";
   menu.appendChild(speedTitle);
 
   const speedGrid = document.createElement("div");
@@ -1131,13 +1146,13 @@
 
   const subtitleTitle = document.createElement("div");
   subtitleTitle.className = "pvsc-section-title";
-  subtitleTitle.textContent = "💬 Altyazı Rengi";
+  subtitleTitle.textContent = "💬 Subtitles";
   menu.appendChild(subtitleTitle);
 
   const subtitleToggleBtn = document.createElement("button");
   subtitleToggleBtn.type = "button";
   subtitleToggleBtn.className = "pvsc-subtitle-toggle";
-  subtitleToggleBtn.textContent = subtitleEnabled ? "Altyazı: Açık ✓" : "Altyazı: Kapalı";
+  subtitleToggleBtn.textContent = subtitleEnabled ? "Subtitles: ON ✓" : "Subtitles: OFF";
   subtitleToggleBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1168,11 +1183,11 @@
   const advancedSubGrid = document.createElement("div");
   advancedSubGrid.className = "pvsc-subtitle-advanced-grid";
 
-  const sizeBtn = makeMenuButton("Boyut: Normal", "", () => cycleSubtitleSize());
+  const sizeBtn = makeMenuButton("Size: Normal", "", () => cycleSubtitleSize());
   sizeBtn.id = "pvsc-btn-subsize";
   advancedSubGrid.appendChild(sizeBtn);
 
-  const bgBtn = makeMenuButton("Arkaplan: Gölge", "", () => cycleSubtitleBg());
+  const bgBtn = makeMenuButton("Bg: Shadow", "", () => cycleSubtitleBg());
   bgBtn.id = "pvsc-btn-subbg";
   advancedSubGrid.appendChild(bgBtn);
 
@@ -1319,7 +1334,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.3.0",
+    version: "3.3.1",
     applySpeed,
     refresh,
     applySubtitleStyles,
