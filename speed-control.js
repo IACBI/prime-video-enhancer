@@ -94,7 +94,7 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.4.1") {
+  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.5.0") {
     window.__primeVideoSpeedControl.refresh();
     window.__primeVideoSpeedControl.applySpeed();
     window.__primeVideoSpeedControl.applySubtitleStyles();
@@ -132,6 +132,10 @@
   let subtitleObserver = null;
   let attachedVideo = null;
   let mutationThrottleTimer = 0;
+
+  const TARGET_AD_SPEED = 30;
+  const FALLBACK_AD_SPEED = 16;
+  let currentAdSpeed = TARGET_AD_SPEED;
 
   let isAdCurrentlyActive = false;
   let wasMutedBeforeAd = false;
@@ -183,11 +187,19 @@
     );
   }
 
+  function handleAdStall() {
+    if (isAdCurrentlyActive && currentAdSpeed > FALLBACK_AD_SPEED) {
+      console.warn("[pvsc] Ad playback stalled at 30x, falling back to 16x");
+      currentAdSpeed = FALLBACK_AD_SPEED;
+      handleVideoPlaybackState();
+    }
+  }
+
   function handleVideoPlaybackState() {
     if (!attachedVideo) return;
     if (isAdCurrentlyActive) {
-      if (attachedVideo.playbackRate !== 16) attachedVideo.playbackRate = 16;
-      if (attachedVideo.defaultPlaybackRate !== 16) attachedVideo.defaultPlaybackRate = 16;
+      if (attachedVideo.playbackRate !== currentAdSpeed) attachedVideo.playbackRate = currentAdSpeed;
+      if (attachedVideo.defaultPlaybackRate !== currentAdSpeed) attachedVideo.defaultPlaybackRate = currentAdSpeed;
       if (attachedVideo.muted !== true) attachedVideo.muted = true;
     } else {
       if (attachedVideo.playbackRate !== speed) attachedVideo.playbackRate = speed;
@@ -208,6 +220,8 @@
       attachedVideo.removeEventListener("play", handleVideoPlaybackState);
       attachedVideo.removeEventListener("playing", handleVideoPlaybackState);
       attachedVideo.removeEventListener("timeupdate", handleVideoPlaybackState);
+      attachedVideo.removeEventListener("waiting", handleAdStall);
+      attachedVideo.removeEventListener("stalled", handleAdStall);
     }
     attachedVideo = video;
     attachedVideo.addEventListener("play", showControls, { passive: true });
@@ -218,6 +232,8 @@
     attachedVideo.addEventListener("play", handleVideoPlaybackState, { passive: true });
     attachedVideo.addEventListener("playing", handleVideoPlaybackState, { passive: true });
     attachedVideo.addEventListener("timeupdate", handleVideoPlaybackState, { passive: true });
+    attachedVideo.addEventListener("waiting", handleAdStall, { passive: true });
+    attachedVideo.addEventListener("stalled", handleAdStall, { passive: true });
     showControls();
   }
 
@@ -229,8 +245,8 @@
     attachVideoListeners(video);
 
     if (isAdCurrentlyActive) {
-      if (video.playbackRate !== 16) video.playbackRate = 16;
-      if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
+      if (video.playbackRate !== currentAdSpeed) video.playbackRate = currentAdSpeed;
+      if (video.defaultPlaybackRate !== currentAdSpeed) video.defaultPlaybackRate = currentAdSpeed;
       if (video.muted !== true) video.muted = true;
       return;
     }
@@ -411,11 +427,13 @@
 
   function exitAdMode(video) {
     if (isAdCurrentlyActive && adModeStartedAt > 0) {
-      const timeSpentAt16x = Date.now() - adModeStartedAt;
-      const savedSecs = Math.floor((timeSpentAt16x * 15) / 1000);
+      const timeSpentAtAdSpeed = Date.now() - adModeStartedAt;
+      const effectiveMultiplier = Math.max(1, currentAdSpeed - 1);
+      const savedSecs = Math.max(1, Math.floor((timeSpentAtAdSpeed * effectiveMultiplier) / 1000));
       incrementAdStats(1, savedSecs);
     }
     isAdCurrentlyActive = false;
+    currentAdSpeed = TARGET_AD_SPEED;
     noAdStreak = 0;
     adModeStartedAt = 0;
     video.muted = wasMutedBeforeAd;
@@ -464,13 +482,14 @@
 
     if (adDetected && !isAdCurrentlyActive && Date.now() >= adCooldownUntil) {
       isAdCurrentlyActive = true;
+      currentAdSpeed = TARGET_AD_SPEED;
       adModeStartedAt = Date.now();
       wasMutedBeforeAd = video.muted;
       showAdCover(video);
       video.muted = true;
       hideVideoForAd(video);
-      if (video.playbackRate !== 16) video.playbackRate = 16;
-      if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
+      if (video.playbackRate !== currentAdSpeed) video.playbackRate = currentAdSpeed;
+      if (video.defaultPlaybackRate !== currentAdSpeed) video.defaultPlaybackRate = currentAdSpeed;
       if (video.paused) {
         try { video.play(); } catch {}
       }
@@ -484,8 +503,8 @@
     }
 
     if (isAdCurrentlyActive && adDetected) {
-      if (video.playbackRate !== 16) video.playbackRate = 16;
-      if (video.defaultPlaybackRate !== 16) video.defaultPlaybackRate = 16;
+      if (video.playbackRate !== currentAdSpeed) video.playbackRate = currentAdSpeed;
+      if (video.defaultPlaybackRate !== currentAdSpeed) video.defaultPlaybackRate = currentAdSpeed;
       if (video.muted !== true) video.muted = true;
       if (video !== adHiddenVideo || video.style.opacity !== "0") hideVideoForAd(video);
       showAdCover(video);
@@ -1396,7 +1415,7 @@
 
   window.__primeVideoSpeedControl = {
     installed: true,
-    version: "3.4.1",
+    version: "3.5.0",
     applySpeed,
     refresh,
     applySubtitleStyles,
