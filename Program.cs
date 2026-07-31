@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
@@ -7,11 +8,6 @@ using System.Text.Json;
 const int RemoteDebuggingPort = 9223;
 const string PrimeVideoUrl = "https://www.primevideo.com/";
 const string ScriptFileName = "speed-control.js";
-// Must match the `version` set on window.__primeVideoSpeedControl in
-// speed-control.js. If they drift, the already-installed fast check either
-// never matches (wasteful re-injection every poll) or — worse — matches an
-// old script and a fixed speed-control.js is never injected into a running tab.
-const string ScriptVersion = "3.5.0";
 
 var edgePath = FindEdgePath();
 if (edgePath is null)
@@ -30,21 +26,29 @@ Console.WriteLine("Close this console window to stop the helper.");
 StartEdge(edgePath);
 
 using var httpClient = new HttpClient();
-var script = LoadInjectionScript();
+var scriptCache = new InjectionScriptCache(
+    Path.Combine(AppContext.BaseDirectory, ScriptFileName),
+    LoadEmbeddedInjectionScript);
 
 while (true)
 {
     try
     {
-        script = LoadInjectionScript();
+        var script = scriptCache.GetScript();
         var targets = await GetTargets(httpClient);
+        var foundPrimeVideoTarget = false;
         foreach (var target in targets)
         {
-            if (IsPrimeVideoTarget(target) && target.WebSocketDebuggerUrl is not null)
+            if (PrimeVideoTargetMatcher.IsMatch(target) && target.WebSocketDebuggerUrl is not null)
             {
+                foundPrimeVideoTarget = true;
                 await InjectSpeedControl(target.WebSocketDebuggerUrl, script);
-                AppIconHelper.ApplyToEdgeWindows();
             }
+        }
+
+        if (foundPrimeVideoTarget)
+        {
+            AppIconHelper.ApplyToEdgeWindows();
         }
     }
     catch (OperationCanceledException)
@@ -79,14 +83,8 @@ static string? FindEdgePath()
     return candidates.FirstOrDefault(File.Exists);
 }
 
-static string LoadInjectionScript()
+static string LoadEmbeddedInjectionScript()
 {
-    var scriptPath = Path.Combine(AppContext.BaseDirectory, ScriptFileName);
-    if (File.Exists(scriptPath))
-    {
-        return File.ReadAllText(scriptPath, Encoding.UTF8);
-    }
-
     try
     {
         using var stream = typeof(Program).Assembly.GetManifestResourceStream("PrimeVideoSpeedApp.speed-control.js");
@@ -96,9 +94,12 @@ static string LoadInjectionScript()
             return reader.ReadToEnd();
         }
     }
-    catch { }
+    catch (Exception ex)
+    {
+        throw new InvalidOperationException("The embedded speed-control script could not be loaded.", ex);
+    }
 
-    throw new FileNotFoundException($"Required script file was not found locally or embedded: {scriptPath}");
+    throw new FileNotFoundException("The embedded speed-control script was not found.");
 }
 
 static void CreateShortcut(string shortcutPath, string targetPath, string arguments, string iconPath)
@@ -193,27 +194,9 @@ static async Task<List<DebugTarget>> GetTargets(HttpClient httpClient)
     using var response = await httpClient.GetAsync($"http://127.0.0.1:{RemoteDebuggingPort}/json", cts.Token);
     response.EnsureSuccessStatusCode();
     using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
-    var targets = await JsonSerializer.DeserializeAsync<List<DebugTarget>>(stream, JsonOptions(), cts.Token);
+    var targets = await JsonSerializer.DeserializeAsync<List<DebugTarget>>(stream, AppJson.Options, cts.Token);
     return targets ?? [];
 }
-
-static bool IsPrimeVideoTarget(DebugTarget target)
-{
-    if (!string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase))
-    {
-        return false;
-    }
-
-    return target.Url.Contains("primevideo.com", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.com/gp/video", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.com.tr/gp/video", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.co.uk/gp/video", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.de/gp/video", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.fr/gp/video", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.it/gp/video", StringComparison.OrdinalIgnoreCase)
-        || target.Url.Contains("amazon.es/gp/video", StringComparison.OrdinalIgnoreCase);
-}
-
 
 static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
 {
@@ -222,21 +205,8 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
     await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), cts.Token);
 
     // --- Layer 1: Network.setBlockedURLs (legacy, broad pattern matching) ---
-    var enableNetworkPayload = JsonSerializer.Serialize(new
-    {
-        id = 10,
-        method = "Network.enable",
-        @params = new { }
-    });
-    await socket.SendAsync(Encoding.UTF8.GetBytes(enableNetworkPayload), WebSocketMessageType.Text, true, cts.Token);
-
-    var blockedUrlsPayload = JsonSerializer.Serialize(new
-    {
-        id = 11,
-        method = "Network.setBlockedURLs",
-        @params = new { urls = AdBlocker.SafeBlockPatterns }
-    });
-    await socket.SendAsync(Encoding.UTF8.GetBytes(blockedUrlsPayload), WebSocketMessageType.Text, true, cts.Token);
+    await socket.SendAsync(CdpPayloads.EnableNetwork, WebSocketMessageType.Text, true, cts.Token);
+    await socket.SendAsync(CdpPayloads.SetBlockedUrls, WebSocketMessageType.Text, true, cts.Token);
 
     // NOTE: Fetch-domain interception is intentionally NOT enabled on this short-lived
     // socket. It used to be (a separate Fetch.enable call here), but that socket is
@@ -248,34 +218,18 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
     // The persistent interceptor is the single owner of Fetch interception per target.
 
     // --- Script injection (check if already installed with correct version) ---
-    string fastCheckExpression = $"(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '{ScriptVersion}' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)";
-    var checkPayload = JsonSerializer.Serialize(new
-    {
-        id = 1,
-        method = "Runtime.evaluate",
-        @params = new
-        {
-            expression = fastCheckExpression,
-            awaitPromise = false,
-            returnByValue = true
-        }
-    });
-
-    await socket.SendAsync(Encoding.UTF8.GetBytes(checkPayload), WebSocketMessageType.Text, true, cts.Token);
+    await socket.SendAsync(CdpPayloads.CheckInstalledScript, WebSocketMessageType.Text, true, cts.Token);
 
     var buffer = new byte[16384];
     bool alreadyInstalled = false;
     for (int i = 0; i < 10; i++)
     {
-        var result = await socket.ReceiveAsync(buffer, cts.Token);
-        if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
+        var responseText = await CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, cts.Token);
+        if (responseText is null) break;
+        if (CdpResponseReader.IsResponseForId(responseText, 1))
         {
-            var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            if (responseText.Contains("\"id\":1", StringComparison.OrdinalIgnoreCase) || responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase))
-            {
-                alreadyInstalled = responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase);
-                break;
-            }
+            alreadyInstalled = responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase);
+            break;
         }
         if (cts.Token.IsCancellationRequested) break;
     }
@@ -297,23 +251,15 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
         await socket.SendAsync(Encoding.UTF8.GetBytes(fullPayload), WebSocketMessageType.Text, true, cts.Token);
         for (int i = 0; i < 10; i++)
         {
-            var result = await socket.ReceiveAsync(buffer, cts.Token);
-            if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
-            {
-                var responseText = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                if (responseText.Contains("\"id\":2", StringComparison.OrdinalIgnoreCase))
-                {
-                    break;
-                }
-            }
+            var responseText = await CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, cts.Token);
+            if (responseText is null || CdpResponseReader.IsResponseForId(responseText, 2)) break;
             if (cts.Token.IsCancellationRequested) break;
         }
     }
 
     // --- Start persistent Fetch interceptor if not already active for this target ---
-    if (!AdBlocker.ActiveInterceptors.Contains(webSocketDebuggerUrl))
+    if (InterceptorRegistry.TryRegister(webSocketDebuggerUrl))
     {
-        AdBlocker.ActiveInterceptors.Add(webSocketDebuggerUrl);
         _ = Task.Run(() => RunFetchInterceptorLoop(webSocketDebuggerUrl));
     }
 }
@@ -334,18 +280,7 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
         // allowed to proceed — a major source of playback stutter/latency. Narrowing
         // the pattern list means non-ad requests never enter the Fetch domain at all
         // and load at full speed.
-        var fetchEnablePayload = JsonSerializer.Serialize(new
-        {
-            id = 100,
-            method = "Fetch.enable",
-            @params = new
-            {
-                patterns = AdBlocker.Patterns
-                    .Select(pattern => new { urlPattern = pattern, requestStage = "Request" })
-                    .ToArray()
-            }
-        });
-        await socket.SendAsync(Encoding.UTF8.GetBytes(fetchEnablePayload), WebSocketMessageType.Text, true, CancellationToken.None);
+        await socket.SendAsync(CdpPayloads.EnableFetch, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var buffer = new byte[32768];
         var nextId = 300;
@@ -401,6 +336,7 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
             // Handle Fetch.requestPaused events
             if (responseText.Contains("\"Fetch.requestPaused\"", StringComparison.OrdinalIgnoreCase))
             {
+                string? pausedRequestId = null;
                 try
                 {
                     using var doc = JsonDocument.Parse(responseText);
@@ -409,6 +345,8 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                         paramsEl.TryGetProperty("requestId", out var requestIdEl))
                     {
                         var requestId = requestIdEl.GetString();
+                        if (string.IsNullOrEmpty(requestId)) continue;
+                        pausedRequestId = requestId;
                         var requestUrl = "";
                         if (paramsEl.TryGetProperty("request", out var requestEl) &&
                             requestEl.TryGetProperty("url", out var urlEl))
@@ -416,48 +354,44 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                             requestUrl = urlEl.GetString() ?? "";
                         }
 
-                        if (AdBlocker.IsAdRequest(requestUrl))
+                        var action = AdBlocker.ClassifyRequest(requestUrl);
+                        if (action == AdRequestAction.FulfillEmptyVast)
                         {
-                            // Check if it's a VAST/VPAID request — return empty VAST XML
-                            if (requestUrl.Contains("/vast", StringComparison.OrdinalIgnoreCase) ||
-                                requestUrl.Contains("/vpaid", StringComparison.OrdinalIgnoreCase) ||
-                                requestUrl.Contains("vast.xml", StringComparison.OrdinalIgnoreCase))
+                            var emptyVast = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VAST version=\"3.0\"/>";
+                            var emptyVastBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(emptyVast));
+                            var fulfillPayload = JsonSerializer.Serialize(new
                             {
-                                var emptyVast = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VAST version=\"3.0\"/>";
-                                var emptyVastBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(emptyVast));
-                                var fulfillPayload = JsonSerializer.Serialize(new
+                                id = nextId++,
+                                method = "Fetch.fulfillRequest",
+                                @params = new
                                 {
-                                    id = nextId++,
-                                    method = "Fetch.fulfillRequest",
-                                    @params = new
+                                    requestId = requestId,
+                                    responseCode = 200,
+                                    responseHeaders = new[]
                                     {
-                                        requestId = requestId,
-                                        responseCode = 200,
-                                        responseHeaders = new[]
-                                        {
-                                            new { name = "Content-Type", value = "application/xml" },
-                                            new { name = "Access-Control-Allow-Origin", value = "*" }
-                                        },
-                                        body = emptyVastBase64
-                                    }
-                                });
-                                await socket.SendAsync(Encoding.UTF8.GetBytes(fulfillPayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                            }
-                            else
+                                        new { name = "Content-Type", value = "application/xml" },
+                                        new { name = "Access-Control-Allow-Origin", value = "*" }
+                                    },
+                                    body = emptyVastBase64
+                                }
+                            });
+                            await socket.SendAsync(Encoding.UTF8.GetBytes(fulfillPayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                            pausedRequestId = null;
+                        }
+                        else if (action == AdRequestAction.Block)
+                        {
+                            var failPayload = JsonSerializer.Serialize(new
                             {
-                                // Block the ad request entirely
-                                var failPayload = JsonSerializer.Serialize(new
+                                id = nextId++,
+                                method = "Fetch.failRequest",
+                                @params = new
                                 {
-                                    id = nextId++,
-                                    method = "Fetch.failRequest",
-                                    @params = new
-                                    {
-                                        requestId = requestId,
-                                        errorReason = "BlockedByClient"
-                                    }
-                                });
-                                await socket.SendAsync(Encoding.UTF8.GetBytes(failPayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                            }
+                                    requestId = requestId,
+                                    errorReason = "BlockedByClient"
+                                }
+                            });
+                            await socket.SendAsync(Encoding.UTF8.GetBytes(failPayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                            pausedRequestId = null;
                         }
                         else
                         {
@@ -469,12 +403,30 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                                 @params = new { requestId = requestId }
                             });
                             await socket.SendAsync(Encoding.UTF8.GetBytes(continuePayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                            pausedRequestId = null;
                         }
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Ad shield: failed to handle a network request event ({ex.GetType().Name}: {ex.Message}).");
+                    if (pausedRequestId is not null && socket.State == WebSocketState.Open)
+                    {
+                        try
+                        {
+                            var continuePayload = JsonSerializer.Serialize(new
+                            {
+                                id = nextId++,
+                                method = "Fetch.continueRequest",
+                                @params = new { requestId = pausedRequestId }
+                            });
+                            await socket.SendAsync(Encoding.UTF8.GetBytes(continuePayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                        }
+                        catch (Exception continueEx)
+                        {
+                            Console.WriteLine($"Ad shield: could not release a paused request ({continueEx.GetType().Name}).");
+                        }
+                    }
                 }
             }
         }
@@ -485,16 +437,203 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
     }
     finally
     {
-        AdBlocker.ActiveInterceptors.Remove(webSocketDebuggerUrl);
+        InterceptorRegistry.Remove(webSocketDebuggerUrl);
     }
 }
 
-static JsonSerializerOptions JsonOptions()
+internal static class AppJson
 {
-    return new JsonSerializerOptions
+    public static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true
     };
+}
+
+internal static class CdpResponseReader
+{
+    public static bool IsResponseForId(string json, int expectedId)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("id", out var idElement) &&
+                idElement.TryGetInt32(out var id) &&
+                id == expectedId;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    public static async Task<string?> ReceiveTextMessageAsync(
+        ClientWebSocket socket,
+        byte[] buffer,
+        CancellationToken cancellationToken)
+    {
+        using var messageStream = new MemoryStream();
+        WebSocketReceiveResult result;
+        do
+        {
+            result = await socket.ReceiveAsync(buffer, cancellationToken);
+            if (result.MessageType == WebSocketMessageType.Close) return null;
+            if (result.MessageType != WebSocketMessageType.Text) continue;
+            if (result.Count > 0) messageStream.Write(buffer, 0, result.Count);
+        } while (!result.EndOfMessage);
+
+        return messageStream.Length == 0
+            ? string.Empty
+            : Encoding.UTF8.GetString(messageStream.GetBuffer(), 0, (int)messageStream.Length);
+    }
+}
+
+internal sealed class InjectionScriptCache
+{
+    private readonly string scriptPath;
+    private readonly Func<string> embeddedScriptLoader;
+    private readonly object syncRoot = new();
+    private DateTime cachedLastWriteTimeUtc;
+    private long cachedLength = -1;
+    private string? cachedExternalScript;
+    private string? cachedEmbeddedScript;
+
+    public InjectionScriptCache(string scriptPath, Func<string> embeddedScriptLoader)
+    {
+        this.scriptPath = scriptPath;
+        this.embeddedScriptLoader = embeddedScriptLoader;
+    }
+
+    public string GetScript()
+    {
+        var scriptInfo = new FileInfo(scriptPath);
+        if (scriptInfo.Exists)
+        {
+            lock (syncRoot)
+            {
+                if (cachedExternalScript is not null &&
+                    cachedLastWriteTimeUtc == scriptInfo.LastWriteTimeUtc &&
+                    cachedLength == scriptInfo.Length)
+                {
+                    return cachedExternalScript;
+                }
+
+                try
+                {
+                    var script = File.ReadAllText(scriptPath, Encoding.UTF8);
+                    cachedExternalScript = script;
+                    cachedLastWriteTimeUtc = scriptInfo.LastWriteTimeUtc;
+                    cachedLength = scriptInfo.Length;
+                    return script;
+                }
+                catch (IOException) when (cachedExternalScript is not null)
+                {
+                    // An editor may briefly replace or lock the file while saving.
+                    // Keep the last valid script and retry on the next polling cycle.
+                    return cachedExternalScript;
+                }
+            }
+        }
+
+        lock (syncRoot)
+        {
+            return cachedEmbeddedScript ??= embeddedScriptLoader();
+        }
+    }
+}
+
+internal static class PrimeVideoTargetMatcher
+{
+    private static readonly HashSet<string> AmazonVideoHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "amazon.com", "amazon.com.tr", "amazon.co.uk", "amazon.de",
+        "amazon.fr", "amazon.it", "amazon.es"
+    };
+
+    public static bool IsMatch(DebugTarget target)
+    {
+        if (!string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase) ||
+            !Uri.TryCreate(target.Url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (HostMatches(uri.Host, "primevideo.com"))
+        {
+            return true;
+        }
+
+        var isAmazonVideoPath = uri.AbsolutePath.Equals("/gp/video", StringComparison.OrdinalIgnoreCase) ||
+            uri.AbsolutePath.StartsWith("/gp/video/", StringComparison.OrdinalIgnoreCase);
+        return isAmazonVideoPath && AmazonVideoHosts.Any(host => HostMatches(uri.Host, host));
+    }
+
+    private static bool HostMatches(string host, string domain) =>
+        host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+        host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+}
+
+internal static class InterceptorRegistry
+{
+    private static readonly ConcurrentDictionary<string, byte> Active = new(StringComparer.Ordinal);
+
+    public static bool TryRegister(string targetUrl) => Active.TryAdd(targetUrl, 0);
+
+    public static bool Remove(string targetUrl) => Active.TryRemove(targetUrl, out _);
+}
+
+internal static class CdpPayloads
+{
+    // Must match the version exported by speed-control.js. Version drift either
+    // causes needless reinjection or prevents a corrected script from loading.
+    private const string ScriptVersion = "3.5.3";
+
+    public static readonly byte[] EnableNetwork = Serialize(new
+    {
+        id = 10,
+        method = "Network.enable",
+        @params = new { }
+    });
+
+    public static readonly byte[] SetBlockedUrls = Serialize(new
+    {
+        id = 11,
+        method = "Network.setBlockedURLs",
+        @params = new { urls = AdBlocker.SafeBlockPatterns }
+    });
+
+    public static readonly byte[] CheckInstalledScript = Serialize(new
+    {
+        id = 1,
+        method = "Runtime.evaluate",
+        @params = new
+        {
+            expression = $"(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '{ScriptVersion}' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)",
+            awaitPromise = false,
+            returnByValue = true
+        }
+    });
+
+    public static readonly byte[] EnableFetch = Serialize(new
+    {
+        id = 100,
+        method = "Fetch.enable",
+        @params = new
+        {
+            patterns = AdBlocker.Patterns
+                .Select(pattern => new { urlPattern = pattern, requestStage = "Request" })
+                .ToArray()
+        }
+    });
+
+    private static byte[] Serialize<T>(T payload) =>
+        JsonSerializer.SerializeToUtf8Bytes(payload);
+}
+
+internal enum AdRequestAction
+{
+    Continue,
+    Block,
+    FulfillEmptyVast
 }
 
 internal static class AdBlocker
@@ -509,9 +648,6 @@ internal static class AdBlocker
     public static readonly string[] SafeBlockPatterns = new[]
     {
         "*amazon-adsystem.com*",
-        "*aax-*.amazon-adsystem.com*",
-        "*amazon-adsystem.com/aax2/*",
-        "*amazon-adsystem.com/e/dtb/*",
         "*unagi*.amazon.com*",
         "*aan.amazon.co*",
         "*fls-*.amazon.com*",
@@ -600,7 +736,8 @@ internal static class AdBlocker
     static readonly string[] PathPatterns = new[]
     {
         "/vast/", "/vpaid/", "/vast.xml", "/VAST", "/ad-manifest", "/interstitial",
-        "/aax2/", "/e/dtb/", "/telemetry", "/gp/uedata", "/csm/"
+        "/aax2/", "/e/dtb/", "/telemetry", "/gp/uedata", "/csm/", "/api/ads/",
+        "/api/2017/suggestions"
     };
 
     // Hosts on which the generic PathPatterns above are allowed to match. Prime
@@ -618,11 +755,23 @@ internal static class AdBlocker
         "amazon.com.au", "amazon.nl", "amazon.se", "amazon.com.tr", "amazon-adsystem.com"
     };
 
-    public static readonly HashSet<string> ActiveInterceptors = new();
-
     static bool HostMatches(string host, string domain) =>
         host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
         host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+
+    static bool IsAmazonAdHost(string host)
+    {
+        if (HostMatches(host, "amazon-adsystem.com")) return true;
+        if (host.Equals("aan.amazon.co", StringComparison.OrdinalIgnoreCase) ||
+            host.StartsWith("aan.amazon.co.", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!HostMatches(host, "amazon.com")) return false;
+
+        var firstLabel = host.Split('.')[0];
+        return firstLabel.StartsWith("unagi", StringComparison.OrdinalIgnoreCase) ||
+            firstLabel.StartsWith("fls-", StringComparison.OrdinalIgnoreCase) ||
+            firstLabel.StartsWith("device-metrics", StringComparison.OrdinalIgnoreCase) ||
+            firstLabel.StartsWith("mads", StringComparison.OrdinalIgnoreCase);
+    }
 
     public static bool IsAdRequest(string url)
     {
@@ -631,6 +780,7 @@ internal static class AdBlocker
         {
             var uri = new Uri(url);
             var host = uri.Host;
+            if (IsAmazonAdHost(host)) return true;
             foreach (var domain in Domains)
             {
                 if (HostMatches(host, domain))
@@ -657,6 +807,18 @@ internal static class AdBlocker
         }
         catch { }
         return false;
+    }
+
+    public static AdRequestAction ClassifyRequest(string url)
+    {
+        if (!IsAdRequest(url)) return AdRequestAction.Continue;
+        if (url.Contains("/vast", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("/vpaid", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("vast.xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return AdRequestAction.FulfillEmptyVast;
+        }
+        return AdRequestAction.Block;
     }
 }
 
@@ -1078,7 +1240,6 @@ internal static class AppIconHelper
 
 internal sealed class DebugTarget
 {
-    public string Id { get; set; } = "";
     public string Type { get; set; } = "";
     public string Url { get; set; } = "";
     public string? WebSocketDebuggerUrl { get; set; }

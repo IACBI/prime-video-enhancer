@@ -12,6 +12,11 @@
   const SUBTITLE_BG_KEY = "primeVideoSpeedControl.subtitleBg";
   const ADS_BLOCKED_KEY = "primeVideoSpeedControl.adsBlockedCount";
   const ADS_SAVED_SEC_KEY = "primeVideoSpeedControl.adsTimeSavedSecs";
+  const SUBTITLE_TEXT_SELECTOR = [
+    ".atvwebplayersdk-subtitle-text",
+    ".atvwebplayersdk-captions-text",
+    ".timedText"
+  ].join(", ");
   
   const MIN_SPEED = 0.25;
   const MAX_SPEED = 4;
@@ -36,19 +41,19 @@
   const AD_END_CONFIRM_TICKS = 2;
 
   // Safety valve: real Amazon Prime Video ad breaks don't run this long. If the
-  // shield has been continuously engaged (muted, 16x, video hidden) for longer
+  // shield has been continuously engaged (muted, hyper-speed, video hidden) for longer
   // than this, it's almost certainly a stuck or false detection rather than a
   // real ad, so playback is forcibly handed back to the user instead of racing
-  // through the rest of the episode at 16x behind a black cover.
+  // through the rest of the episode at ad speed behind a black cover.
   const AD_MAX_DURATION_MS = 45000;
 
   // After the safety valve force-exits ad mode, suppress re-engaging the visual
   // shield for this long. Without a cooldown, a persistently-matching element
   // (a stuck indicator, or UI we misclassify) re-engages ad mode on the very
   // next 200ms tick after the valve fires, turning one false positive into an
-  // endless loop of black-screen/16x windows. Skip-button clicking and the
+  // endless loop of black-screen/hyper-speed windows. Skip-button clicking and the
   // network-level blocker stay active during the cooldown, so real ads are
-  // still handled — only the mute/hide/16x shield is suppressed.
+  // still handled — only the mute/hide/hyper-speed shield is suppressed.
   const AD_COOLDOWN_AFTER_VALVE_MS = 120000;
 
   const AUTO_SKIP_SELECTOR = [
@@ -69,7 +74,7 @@
 
   // Note: .atvwebplayersdk-ad-resume-message is intentionally excluded here. It
   // appears once the ad break has ENDED and real content is resuming, so treating
-  // it as an "ad still active" signal (as before) kept the video muted/16x-speed/
+  // it as an "ad still active" signal (as before) kept the video muted/ad-speed/
   // frozen for the first few seconds of real content.
   const AD_INDICATOR_SELECTOR = [
     ".atvwebplayersdk-ad-timer-countdown",
@@ -94,12 +99,16 @@
     ".ad-break-container"
   ].join(", ");
 
-  if (window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === "3.5.0") {
-    window.__primeVideoSpeedControl.refresh();
-    window.__primeVideoSpeedControl.applySpeed();
-    window.__primeVideoSpeedControl.applySubtitleStyles();
-    window.__primeVideoSpeedControl.checkAndHandleAds();
-    return "already-installed";
+  const previousControl = window.__primeVideoSpeedControl;
+  if (previousControl?.installed) {
+    if (previousControl.version === "3.5.3") {
+      previousControl.refresh();
+      previousControl.applySpeed();
+      previousControl.applySubtitleStyles();
+      previousControl.checkAndHandleAds();
+      return "already-installed";
+    }
+    previousControl.destroy?.();
   }
 
   let speed = Number(window.localStorage.getItem(STORAGE_KEY));
@@ -132,6 +141,11 @@
   let subtitleObserver = null;
   let attachedVideo = null;
   let mutationThrottleTimer = 0;
+  let maintenanceTimer = 0;
+  let refreshTimer = 0;
+  const lifecycleController = new AbortController();
+  const lifecycleSignal = lifecycleController.signal;
+  const styledSubtitleElements = new Map();
 
   const TARGET_AD_SPEED = 30;
   const FALLBACK_AD_SPEED = 16;
@@ -143,6 +157,8 @@
   let adModeStartedAt = 0;
   let adCooldownUntil = 0;
   let adHiddenVideo = null;
+  const handledAutoSkipButtons = new WeakSet();
+  const handledAdSkipButtons = new WeakSet();
 
   function clamp(value) {
     return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
@@ -207,21 +223,26 @@
     }
   }
 
+  function detachVideoListeners(video) {
+    if (!video) return;
+    video.removeEventListener("play", showControls);
+    video.removeEventListener("playing", showControls);
+    video.removeEventListener("pause", showControls);
+    video.removeEventListener("seeked", showControls);
+    video.removeEventListener("ratechange", handleVideoPlaybackState);
+    video.removeEventListener("play", handleVideoPlaybackState);
+    video.removeEventListener("playing", handleVideoPlaybackState);
+    video.removeEventListener("timeupdate", handleVideoPlaybackState);
+    video.removeEventListener("waiting", handleAdStall);
+    video.removeEventListener("stalled", handleAdStall);
+  }
+
   function attachVideoListeners(video) {
     if (!video || video === attachedVideo) {
       return;
     }
     if (attachedVideo) {
-      attachedVideo.removeEventListener("play", showControls);
-      attachedVideo.removeEventListener("playing", showControls);
-      attachedVideo.removeEventListener("pause", showControls);
-      attachedVideo.removeEventListener("seeked", showControls);
-      attachedVideo.removeEventListener("ratechange", handleVideoPlaybackState);
-      attachedVideo.removeEventListener("play", handleVideoPlaybackState);
-      attachedVideo.removeEventListener("playing", handleVideoPlaybackState);
-      attachedVideo.removeEventListener("timeupdate", handleVideoPlaybackState);
-      attachedVideo.removeEventListener("waiting", handleAdStall);
-      attachedVideo.removeEventListener("stalled", handleAdStall);
+      detachVideoListeners(attachedVideo);
     }
     attachedVideo = video;
     attachedVideo.addEventListener("play", showControls, { passive: true });
@@ -237,8 +258,7 @@
     showControls();
   }
 
-  function applySpeed() {
-    const video = findVideo();
+  function applySpeed(video = findVideo()) {
     if (!video) {
       return;
     }
@@ -315,7 +335,7 @@
   // capture a real freeze-frame via canvas, which therefore failed silently on
   // every real ad (caught by an empty catch), leaving the video hidden
   // (opacity: 0) with nothing drawn over it — a black screen while the video kept
-  // playing at 16x underneath. A plain opaque cover element can't fail this way:
+  // playing at hyper-speed underneath. A plain opaque cover element can't fail this way:
   // it doesn't touch the video's pixels at all, so it always renders.
   function showAdCover(video) {
     if (document.getElementById(AD_COVER_ID)) return; // Already showing
@@ -342,7 +362,7 @@
   // element (e.g. an "ad-break-container" that stays in the DOM between breaks
   // holding a static label or episode text) from engaging the shield on normal
   // content, which showed up to the user as a black screen with the episode
-  // racing at 16x underneath.
+  // racing at ad speed underneath.
   const COUNTDOWN_TEXT_RE = /(\d{1,2}:\d{2})|(\b\d{1,3}\s*(s|sn|sec|second|seconds|saniye)\b)/i;
   const COUNTDOWN_ZERO_RE = /^0{1,2}:00$|^0\s*(s|sn|sec|second|seconds|saniye)$/i;
 
@@ -371,7 +391,7 @@
     // elements (a "loadTimer"/buffering spinner, a "threadIndicator", etc.)
     // that merely contain the letters "ad" don't get treated as real ad UI —
     // this was causing normal buffering/loading UI to trigger the ad shield
-    // (mute + 16x speed + hidden video) on ordinary episode playback.
+    // (mute + ad speed + hidden video) on ordinary episode playback.
     if (!containsAdWord(className) && !containsAdWord(testId)) {
       return false;
     }
@@ -444,24 +464,29 @@
     applySpeed();
   }
 
-  function checkAndHandleAds() {
+  function checkAndHandleAds(video = findVideo()) {
     ensureAdShieldStyle();
-    const video = findVideo();
     if (!video) return;
 
     // Auto-Skip feature
     const autoSkipButtons = document.querySelectorAll(AUTO_SKIP_SELECTOR);
     for (const btn of autoSkipButtons) {
-      if (document.body.contains(btn) && (btn.offsetParent !== null || btn.clientWidth > 0 || btn.clientHeight > 0 || btn.style.display !== "none")) {
-        try { btn.click(); console.log("[pvsc] Auto-skipped intro/outro!"); } catch {}
+      if (!handledAutoSkipButtons.has(btn) && document.body.contains(btn) && isVisible(btn)) {
+        try {
+          btn.click();
+          handledAutoSkipButtons.add(btn);
+          console.log("[pvsc] Auto-skipped intro/outro!");
+        } catch {}
       }
     }
 
     const skipButtons = document.querySelectorAll(AD_SKIP_BUTTON_SELECTOR);
     for (const btn of skipButtons) {
-      if (document.body.contains(btn) && (btn.offsetParent !== null || btn.clientWidth > 0 || btn.clientHeight > 0 || btn.style.display !== "none")) {
-        try { 
-          btn.click(); 
+      if (btn.matches(AUTO_SKIP_SELECTOR)) continue;
+      if (!handledAdSkipButtons.has(btn) && document.body.contains(btn) && isVisible(btn)) {
+        try {
+          btn.click();
+          handledAdSkipButtons.add(btn);
           incrementAdStats(1, 15);
         } catch {}
       }
@@ -555,29 +580,122 @@
         ${bgCss}
         ${shadowCss}
       }
-      .atvwebplayersdk-subtitle-text,
-      .atvwebplayersdk-captions-text,
-      .atvwebplayersdk-subtitle-container > div,
-      .atvwebplayersdk-captions-container > div,
-      .timedText {
-        font-size: ${subtitleSize} !important;
-      }
-      .atvwebplayersdk-subtitle-text span,
-      .atvwebplayersdk-captions-text span,
-      .atvwebplayersdk-subtitle-container span,
-      .atvwebplayersdk-captions-container span,
-      .timedText span {
-        color: ${subtitleColor} !important;
-        font-weight: 700 !important;
-        ${bgCss}
-        ${shadowCss}
-      }
     `;
   }
 
-  function applySubtitleStyles() {
+  const SUBTITLE_STYLE_PROPERTIES = [
+    "color",
+    "font-size",
+    "font-weight",
+    "background-color",
+    "text-shadow"
+  ];
+
+  function rememberSubtitleStyles(element) {
+    if (styledSubtitleElements.has(element)) return;
+    const originalStyles = new Map();
+    for (const property of SUBTITLE_STYLE_PROPERTIES) {
+      originalStyles.set(property, {
+        value: element.style.getPropertyValue(property),
+        priority: element.style.getPropertyPriority(property)
+      });
+    }
+    styledSubtitleElements.set(element, originalStyles);
+  }
+
+  function restoreSubtitleElement(element) {
+    const originalStyles = styledSubtitleElements.get(element);
+    if (!originalStyles) return;
+    for (const [property, original] of originalStyles) {
+      if (original.value) {
+        element.style.setProperty(property, original.value, original.priority);
+      } else {
+        element.style.removeProperty(property);
+      }
+    }
+    styledSubtitleElements.delete(element);
+  }
+
+  function restoreInactiveSubtitleElements(activeElements = new Set()) {
+    for (const element of [...styledSubtitleElements.keys()]) {
+      if (!element.isConnected || !activeElements.has(element)) {
+        restoreSubtitleElement(element);
+      }
+    }
+  }
+
+  function findSubtitleTextElements(video) {
+    if (!video) return new Set();
+    const videoRect = video.getBoundingClientRect();
+    if (videoRect.width <= 0 || videoRect.height <= 0) return new Set();
+
+    const minimumSubtitleTop = videoRect.top + videoRect.height * 0.45;
+    const maximumSubtitleHeight = videoRect.height * 0.3;
+    const elements = new Set();
+    const candidateRoots = document.querySelectorAll(SUBTITLE_TEXT_SELECTOR);
+
+    for (const candidateRoot of candidateRoots) {
+      if (!(candidateRoot instanceof HTMLElement) || root.contains(candidateRoot)) continue;
+      const candidates = [candidateRoot, ...candidateRoot.querySelectorAll("span, div, p")];
+      for (const candidate of candidates) {
+        if (!(candidate instanceof HTMLElement)) continue;
+        const text = candidate.textContent?.trim();
+        if (!text) continue;
+
+        const hasTextChild = [...candidate.children].some(child => child.textContent?.trim());
+        if (hasTextChild) continue;
+
+        const rect = candidate.getBoundingClientRect();
+        const isInsideSubtitleRegion =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.height <= maximumSubtitleHeight &&
+          rect.top >= minimumSubtitleTop &&
+          rect.bottom <= videoRect.bottom + 4 &&
+          rect.right >= videoRect.left &&
+          rect.left <= videoRect.right;
+        if (isInsideSubtitleRegion) {
+          elements.add(candidate);
+        }
+      }
+    }
+
+    return elements;
+  }
+
+  function clearLegacySubtitleOverrides() {
+    const legacyContainers = document.querySelectorAll(
+      ".atvwebplayersdk-subtitle-container, .atvwebplayersdk-captions-container"
+    );
+    const extensionBackgroundValues = new Set([
+      "transparent",
+      "rgba(0, 0, 0, 0.48)",
+      "rgba(0, 0, 0, 0.92)"
+    ]);
+
+    for (const container of legacyContainers) {
+      const candidates = [container, ...container.querySelectorAll("span, div, p")];
+      for (const element of candidates) {
+        if (!(element instanceof HTMLElement) || root.contains(element)) continue;
+        if (element.matches(SUBTITLE_TEXT_SELECTOR) || element.closest(SUBTITLE_TEXT_SELECTOR)) continue;
+
+        const background = element.style.getPropertyValue("background-color").trim();
+        const priority = element.style.getPropertyPriority("background-color");
+        if (priority === "important" && extensionBackgroundValues.has(background)) {
+          element.style.removeProperty("background-color");
+        }
+      }
+    }
+  }
+
+  function applySubtitleStyles(video = findVideo()) {
     ensureSubtitleStyle();
-    if (!subtitleEnabled) return;
+    if (!subtitleEnabled) {
+      restoreInactiveSubtitleElements();
+      return;
+    }
+
+    clearLegacySubtitleOverrides();
 
     // Resolve the bg value we want to set inline.
     // Inline styles always beat CSS rules regardless of specificity, so this is
@@ -592,36 +710,20 @@
       bgValue = "rgba(0, 0, 0, 0.48)";
     }
 
-    const subtitleContainers = document.querySelectorAll(
-      ".atvwebplayersdk-subtitle-text, .atvwebplayersdk-captions-text, .timedText, .atvwebplayersdk-subtitle-container, .atvwebplayersdk-captions-container"
-    );
+    const subtitleElements = findSubtitleTextElements(video);
+    restoreInactiveSubtitleElements(subtitleElements);
 
-    for (const container of subtitleContainers) {
-      if (root.contains(container) || container.id === ROOT_ID) continue;
+    const shadowValue = subtitleBg === "transparent"
+      ? "0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.85)"
+      : "0 2px 5px rgba(0,0,0,0.98), 0 0 2px rgba(0,0,0,1)";
 
-      // Apply bg directly on the container itself
-      if (container instanceof HTMLElement) {
-        container.style.setProperty("background-color", bgValue, "important");
-        const inlineColor = container.style.color;
-        if (inlineColor && inlineColor !== subtitleColor) {
-          container.style.setProperty("color", subtitleColor, "important");
-        }
-      }
-
-      const spans = container.querySelectorAll("span, div, p");
-      for (const el of spans) {
-        if (root.contains(el)) continue;
-        if (!(el instanceof HTMLElement)) continue;
-
-        // Force color override when Prime Video injects its own inline color
-        const inlineColor = el.style.color;
-        if (inlineColor && inlineColor !== subtitleColor) {
-          el.style.setProperty("color", subtitleColor, "important");
-        }
-
-        // Apply bg directly — this wins over both inline and CSS-based bg rules
-        el.style.setProperty("background-color", bgValue, "important");
-      }
+    for (const element of subtitleElements) {
+      rememberSubtitleStyles(element);
+      element.style.setProperty("color", subtitleColor, "important");
+      element.style.setProperty("font-size", subtitleSize, "important");
+      element.style.setProperty("font-weight", "700", "important");
+      element.style.setProperty("background-color", bgValue, "important");
+      element.style.setProperty("text-shadow", shadowValue, "important");
     }
   }
 
@@ -1352,9 +1454,9 @@
     if (!root.contains(event.target)) {
       setMenuOpen(false);
     }
-  });
-  document.addEventListener("mousemove", showControls, { passive: true });
-  document.addEventListener("touchstart", showControls, { passive: true });
+  }, { signal: lifecycleSignal });
+  document.addEventListener("mousemove", showControls, { passive: true, signal: lifecycleSignal });
+  document.addEventListener("touchstart", showControls, { passive: true, signal: lifecycleSignal });
 
   document.addEventListener("keydown", (event) => {
     const target = event.target;
@@ -1398,29 +1500,59 @@
     } else if (event.key === "Escape") {
       setMenuOpen(false);
     }
-  }, true);
+  }, { capture: true, signal: lifecycleSignal });
 
   window.addEventListener("resize", () => {
     const rect = root.getBoundingClientRect();
     setPosition(rect.left, rect.top, Boolean(readSavedPosition()));
     refresh();
-  });
-  window.setInterval(applySpeed, 200);
-  window.setInterval(checkAndHandleAds, 200);
-  window.setInterval(refresh, 500);
+  }, { signal: lifecycleSignal });
+  maintenanceTimer = window.setInterval(() => {
+    const video = findVideo();
+    applySpeed(video);
+    checkAndHandleAds(video);
+  }, 200);
+  refreshTimer = window.setInterval(refresh, 500);
 
   updateActivePreset();
   applySpeed();
   refresh();
 
-  window.__primeVideoSpeedControl = {
+  const controlApi = {
     installed: true,
-    version: "3.5.0",
+    version: "3.5.3",
     applySpeed,
     refresh,
     applySubtitleStyles,
     checkAndHandleAds,
+    destroy() {
+      window.clearInterval(maintenanceTimer);
+      window.clearInterval(refreshTimer);
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(mutationThrottleTimer);
+      lifecycleController.abort();
+      subtitleObserver?.disconnect();
+      detachVideoListeners(attachedVideo);
+      restoreInactiveSubtitleElements();
+
+      if (attachedVideo && isAdCurrentlyActive) {
+        attachedVideo.muted = wasMutedBeforeAd;
+        attachedVideo.playbackRate = speed;
+        attachedVideo.defaultPlaybackRate = speed;
+      }
+      isAdCurrentlyActive = false;
+      restoreHiddenVideos();
+      removeAdCover();
+      root.remove();
+      document.getElementById(STYLE_ID)?.remove();
+      document.getElementById(SUBTITLE_STYLE_ID)?.remove();
+      document.getElementById(AD_SHIELD_STYLE_ID)?.remove();
+      if (window.__primeVideoSpeedControl === controlApi) {
+        delete window.__primeVideoSpeedControl;
+      }
+    }
   };
+  window.__primeVideoSpeedControl = controlApi;
 
   return "installed";
 })();
