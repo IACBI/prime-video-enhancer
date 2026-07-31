@@ -1,3 +1,13 @@
+# Prime Video Enhancer v3.5.4 — Packaging & Release Maintenance
+
+## What's New in v3.5.4
+
+- Windows executable metadata now reports the same version as the GitHub release and injected controller.
+- GitHub Actions dependencies were updated to their current Node.js 24-based major versions, removing deprecated Node.js 20 runtime warnings from release builds.
+- Includes all subtitle isolation, CDP reliability, ad classification, and runtime performance improvements introduced in v3.5.3.
+
+---
+
 # Prime Video Enhancer v3.5.3 — Subtitle Isolation & Ad Shield Reliability
 
 ## What's New in v3.5.3

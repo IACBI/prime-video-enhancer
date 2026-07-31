@@ -34,8 +34,8 @@ function send(method, params = {}) {
 
 const expression = `(() => {
   const control = window.__primeVideoSpeedControl;
-  if (!control || control.version !== "3.5.3") {
-    return { error: "Expected injected controller version 3.5.3" };
+  if (!control || control.version !== "3.5.4") {
+    return { error: "Expected injected controller version 3.5.4" };
   }
 
   document.getElementById("pvsc-smoke-fixture")?.remove();

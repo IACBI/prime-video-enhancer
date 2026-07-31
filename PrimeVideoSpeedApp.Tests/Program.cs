@@ -159,8 +159,8 @@ static void TestScriptVersionConsistency()
 {
     var script = LoadEmbeddedScript();
     var checkPayload = System.Text.Encoding.UTF8.GetString(CdpPayloads.CheckInstalledScript);
-    AssertTrue(script.Contains("version: \"3.5.3\"", StringComparison.Ordinal));
-    AssertTrue(checkPayload.Contains("3.5.3", StringComparison.Ordinal));
+    AssertTrue(script.Contains("version: \"3.5.4\"", StringComparison.Ordinal));
+    AssertTrue(checkPayload.Contains("3.5.4", StringComparison.Ordinal));
 }
 
 static string LoadEmbeddedScript()
