@@ -101,7 +101,7 @@
 
   const previousControl = window.__primeVideoSpeedControl;
   if (previousControl?.installed) {
-    if (previousControl.version === "3.5.4") {
+    if (previousControl.version === "3.5.5") {
       previousControl.refresh();
       previousControl.applySpeed();
       previousControl.applySubtitleStyles();
@@ -561,10 +561,8 @@
     }
     
     let bgCss = "";
-    let shadowCss = "text-shadow: 0 2px 5px rgba(0, 0, 0, 0.98), 0 0 2px rgba(0, 0, 0, 1) !important;";
     if (subtitleBg === "transparent") {
       bgCss = "background-color: transparent !important;";
-      shadowCss = "text-shadow: 0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.85) !important;";
     } else if (subtitleBg === "solid") {
       bgCss = "background-color: rgba(0, 0, 0, 0.9) !important;";
     } else {
@@ -572,13 +570,19 @@
       bgCss = "background-color: rgba(0, 0, 0, 0.45) !important;";
     }
 
+    // Use vh-based size for ::cue so it doesn't compound with Amazon's own
+    // container font-size scaling.  Shadow offsets scale proportionally.
+    const cueSizeVh = computeSubtitleSizeVh();
+    const cueShadow = computeScaledShadow();
+
     style.textContent = `
       video::cue {
         color: ${subtitleColor} !important;
-        font-size: ${subtitleSize} !important;
+        font-size: ${cueSizeVh} !important;
         font-weight: 700 !important;
+        line-height: 1.35 !important;
         ${bgCss}
-        ${shadowCss}
+        text-shadow: ${cueShadow} !important;
       }
     `;
   }
@@ -587,8 +591,13 @@
     "color",
     "font-size",
     "font-weight",
+    "line-height",
     "background-color",
-    "text-shadow"
+    "text-shadow",
+    "padding",
+    "border-radius",
+    "-webkit-box-decoration-break",
+    "box-decoration-break"
   ];
 
   function rememberSubtitleStyles(element) {
@@ -664,28 +673,46 @@
   }
 
   function clearLegacySubtitleOverrides() {
-    const legacyContainers = document.querySelectorAll(
-      ".atvwebplayersdk-subtitle-container, .atvwebplayersdk-captions-container"
-    );
-    const extensionBackgroundValues = new Set([
-      "transparent",
-      "rgba(0, 0, 0, 0.48)",
-      "rgba(0, 0, 0, 0.92)"
-    ]);
-
-    for (const container of legacyContainers) {
-      const candidates = [container, ...container.querySelectorAll("span, div, p")];
-      for (const element of candidates) {
-        if (!(element instanceof HTMLElement) || root.contains(element)) continue;
-        if (element.matches(SUBTITLE_TEXT_SELECTOR) || element.closest(SUBTITLE_TEXT_SELECTOR)) continue;
-
-        const background = element.style.getPropertyValue("background-color").trim();
-        const priority = element.style.getPropertyPriority("background-color");
-        if (priority === "important" && extensionBackgroundValues.has(background)) {
-          element.style.removeProperty("background-color");
-        }
+    const candidateRoots = document.querySelectorAll(SUBTITLE_TEXT_SELECTOR);
+    for (const rootEl of candidateRoots) {
+      if (!(rootEl instanceof HTMLElement) || root.contains(rootEl)) continue;
+      // Strip background-color on parent container when it has styled text children,
+      // preventing nested/double background artifacts.
+      if (rootEl.firstElementChild) {
+        rootEl.style.setProperty("background-color", "transparent", "important");
       }
     }
+  }
+
+  // Converts the user's percentage setting into a vh-based CSS value.
+  // Baseline: 100% setting = 1.85vh ≈ 20px on a 1080p screen.
+  // 150% = 2.78vh ≈ 30px, 200% = 3.70vh ≈ 40px.
+  // Clamped to [1.0vh, 4.2vh] so subtitles are always readable and never block the screen.
+  const SUBTITLE_VH_BASE = 1.85;  // vh per 100% setting
+  const SUBTITLE_VH_MIN  = 1.0;
+  const SUBTITLE_VH_MAX  = 4.2;
+
+  function computeSubtitleSizeVh() {
+    const pct = parseInt(subtitleSize, 10);
+    if (!Number.isFinite(pct) || pct <= 0) return SUBTITLE_VH_BASE + "vh";
+    const raw = (SUBTITLE_VH_BASE * pct) / 100;
+    const clamped = Math.min(SUBTITLE_VH_MAX, Math.max(SUBTITLE_VH_MIN, raw));
+    return clamped.toFixed(2) + "vh";
+  }
+
+  // Returns a text-shadow CSS value whose offsets/blur scale proportionally
+  // with the computed font-size so the shadow looks clean and sharp at any scale.
+  function computeScaledShadow() {
+    const pct = parseInt(subtitleSize, 10) || 100;
+    const scale = Math.max(0.5, pct / 100);
+    if (subtitleBg === "transparent") {
+      const y = (2.5 * scale).toFixed(1);
+      const blur = (4 * scale).toFixed(1);
+      return `-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 ${y}px ${blur}px rgba(0,0,0,0.9)`;
+    }
+    const y = (1.5 * scale).toFixed(1);
+    const blur = (3 * scale).toFixed(1);
+    return `0 ${y}px ${blur}px rgba(0, 0, 0, 0.8)`;
   }
 
   function applySubtitleStyles(video = findVideo()) {
@@ -713,17 +740,28 @@
     const subtitleElements = findSubtitleTextElements(video);
     restoreInactiveSubtitleElements(subtitleElements);
 
-    const shadowValue = subtitleBg === "transparent"
-      ? "0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.85)"
-      : "0 2px 5px rgba(0,0,0,0.98), 0 0 2px rgba(0,0,0,1)";
+    const shadowValue = computeScaledShadow();
+    const inlineFontSize = computeSubtitleSizeVh();
 
     for (const element of subtitleElements) {
       rememberSubtitleStyles(element);
       element.style.setProperty("color", subtitleColor, "important");
-      element.style.setProperty("font-size", subtitleSize, "important");
+      element.style.setProperty("font-size", inlineFontSize, "important");
       element.style.setProperty("font-weight", "700", "important");
+      element.style.setProperty("line-height", "1.35", "important");
       element.style.setProperty("background-color", bgValue, "important");
       element.style.setProperty("text-shadow", shadowValue, "important");
+      if (subtitleBg !== "transparent") {
+        element.style.setProperty("padding", "0.12em 0.35em", "important");
+        element.style.setProperty("border-radius", "4px", "important");
+        element.style.setProperty("-webkit-box-decoration-break", "clone", "important");
+        element.style.setProperty("box-decoration-break", "clone", "important");
+      } else {
+        element.style.removeProperty("padding");
+        element.style.removeProperty("border-radius");
+        element.style.removeProperty("-webkit-box-decoration-break");
+        element.style.removeProperty("box-decoration-break");
+      }
     }
   }
 
@@ -750,6 +788,7 @@
         if (mutationThrottleTimer) return;
         let shouldApplySubtitles = false;
         let shouldCheckAds = false;
+        let hasNewSubtitleElement = false;
         for (const mutation of mutations) {
           if (mutation.type === "attributes" && (mutation.attributeName === "style" || mutation.attributeName === "class")) {
             const target = mutation.target;
@@ -761,6 +800,15 @@
           } else if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
             for (const node of mutation.addedNodes) {
               if (node instanceof HTMLElement && !root.contains(node)) {
+                // Fast-path: detect subtitle element additions immediately to avoid flash.
+                // When Prime Video injects a new subtitle span, apply our styles
+                // synchronously before the browser paints — no 50 ms debounce delay.
+                if (subtitleEnabled && (
+                  node.matches(SUBTITLE_TEXT_SELECTOR) ||
+                  node.querySelector(SUBTITLE_TEXT_SELECTOR) !== null
+                )) {
+                  hasNewSubtitleElement = true;
+                }
                 shouldApplySubtitles = true;
                 shouldCheckAds = true;
                 break;
@@ -769,11 +817,18 @@
             if (shouldApplySubtitles) break;
           }
         }
+        // Apply subtitle styles immediately when a new subtitle element appears.
+        // This runs synchronously in the MutationObserver microtask, before the
+        // next paint, so Amazon's default color/size is never visible to the user.
+        if (hasNewSubtitleElement) {
+          applySubtitleStyles();
+        }
         if (shouldCheckAds || shouldApplySubtitles) {
           mutationThrottleTimer = window.setTimeout(() => {
             mutationThrottleTimer = 0;
             if (shouldCheckAds) checkAndHandleAds();
-            if (shouldApplySubtitles && subtitleEnabled) applySubtitleStyles();
+            // Skip the deferred subtitle pass if the fast-path already handled it.
+            if (shouldApplySubtitles && subtitleEnabled && !hasNewSubtitleElement) applySubtitleStyles();
           }, 50);
         }
       });
@@ -1520,7 +1575,7 @@
 
   const controlApi = {
     installed: true,
-    version: "3.5.4",
+    version: "3.5.5",
     applySpeed,
     refresh,
     applySubtitleStyles,
