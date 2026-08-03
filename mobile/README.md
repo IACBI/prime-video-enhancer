@@ -1,47 +1,55 @@
-# Prime Video Enhancer — Mobile App (Android & iOS)
+# Prime Video Enhancer mobile app
 
-This is the mobile adaptation of **Prime Video Enhancer**, built with **Flutter** and `flutter_inappwebview`. It brings the exact same 5-Layer Ad Shield, custom speed controls (`0.25x` to `4.0x`), and personalized subtitle styling (color, size, background) to mobile devices.
+The mobile app is a Flutter project that opens Prime Video in an embedded WebView. It shares the desktop controller's playback-speed and subtitle preferences, and applies best-effort filtering to selected ad-related and telemetry requests within that WebView.
 
----
+For desktop downloads, privacy information, and the general quick start, see the [repository README](../README.md).
 
-## 📱 Features
+## Availability
 
-- **Network-Level Mobile Ad Shield:** Intercepts and blocks Amazon ad/telemetry host requests (`amazon-adsystem.com`, `unagi`, `mads`, `aan.amazon.co.*`) directly inside the mobile WebView.
-- **Shared Controller Engine:** Uses the shared `speed-control.js` engine for 100% feature parity with the Desktop application.
-- **Touch-Optimized Bottom Sheet UI:** Tapping the compact floating badge (`1.2x ⚡`) slides up a mobile-friendly bottom sheet menu designed for single-thumb touch operation.
-- **Full-Screen Playback Support:** Automatic sticky immersive mode during video fullscreen.
-- **DRM Playback Ready:** Built on native mobile WebViews with Widevine L3 / FairPlay DRM support.
+| Platform | Status |
+| --- | --- |
+| Android | Release APKs are published on the [latest GitHub Release](https://github.com/IACBI/prime-video-enhancer/releases/latest). |
+| iOS | Source files are included under `ios/`; signed iOS builds, TestFlight distribution, and App Store delivery are not provided by this repository. |
 
----
+WebView playback support depends on the device, operating-system WebView, account, region, and Prime Video itself. The project does not promise DRM playback, content availability, or request-filtering results on any particular device.
 
-## 🛠️ Building the Mobile App
+## What the mobile app does
 
-### Requirements
+- Loads `https://www.primevideo.com` in `flutter_inappwebview`.
+- Injects the bundled `assets/speed-control.js` at document start and reinjects it after navigation when necessary.
+- Offers playback speeds from `0.25x` to `4x` and locally stored subtitle preferences when the target page exposes compatible elements.
+- Uses `shouldInterceptRequest` to return an empty response for a small set of ad-related or telemetry URL patterns.
+- Uses immersive mode while the WebView enters fullscreen.
 
-- [Flutter SDK 3.x](https://docs.flutter.dev/get-started/install)
-- Android Studio / Android SDK (for Android APK)
-- Xcode / macOS (for iOS IPA)
+The app does not install a VPN, proxy, root certificate, or system-wide request blocker. It does not collect account credentials or transmit telemetry.
 
-### 1. Android APK Build
+## Build an Android APK
 
-To build a standalone `.apk` for Android:
+Requirements:
+
+- Flutter 3.x
+- Android SDK and a supported emulator or device for testing
+- Java 17
 
 ```bash
 cd mobile
 flutter pub get
+flutter analyze
+flutter test
 flutter build apk --release
 ```
 
-The compiled APK will be located at:
-`mobile/build/app/outputs/flutter-apk/app-release.apk`
+The release APK is written to:
 
-Users can download this `.apk` file directly to their Android phone, enable *"Install from unknown sources"*, and install it in seconds.
+```text
+build/app/outputs/flutter-apk/app-release.apk
+```
 
----
+Install only APKs you trust. On Android, enabling installation from an unknown source is a device-level decision; review the platform warning before proceeding.
 
-### 2. iOS Build (TestFlight / IPA)
+## Build for iOS
 
-To build an `.ipa` for iOS:
+Use macOS with Xcode and a configured Apple developer account:
 
 ```bash
 cd mobile
@@ -49,20 +57,20 @@ flutter pub get
 flutter build ipa --release
 ```
 
-- **TestFlight:** Upload the generated `.ipa` to Apple App Store Connect to distribute via a public TestFlight link.
-- **Sideloading:** Install directly using AltStore, Sideloadly, or Scarlet.
+You are responsible for bundle identifiers, signing certificates, provisioning profiles, and any TestFlight or App Store submission. Validate Prime Video and WebView behaviour on physical devices before distribution.
 
----
+## Project structure
 
-## 📂 Project Structure
-
-```
+```text
 mobile/
-├── assets/
-│   └── speed-control.js     # Shared JavaScript controller engine
-├── lib/
-│   └── main.dart            # Flutter InAppWebView & Ad-Shield Network Interceptor
-├── android/                 # Native Android project files & AndroidManifest
-├── pubspec.yaml             # Dependencies & Asset configuration
-└── README.md                # Mobile documentation
+├── assets/speed-control.js  # Mobile copy of the shared controller
+├── lib/main.dart            # WebView, local request filtering, fullscreen handling
+├── android/                 # Android host project
+├── ios/                     # iOS host project
+├── test/                    # Flutter smoke tests
+└── pubspec.yaml             # Package metadata and dependencies
 ```
+
+## Keeping the controller in sync
+
+`../speed-control.js` and `assets/speed-control.js` are intentionally kept in sync. When changing the controller, update both copies and the corresponding version check in the desktop project, then run the checks listed in [CONTRIBUTING.md](../CONTRIBUTING.md).

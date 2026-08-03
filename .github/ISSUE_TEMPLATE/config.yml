@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/IACBI/prime-video-enhancer/security/advisories/new
+    about: Report suspected vulnerabilities privately. Do not open a public issue.
+  - name: Troubleshooting guide
+    url: https://github.com/IACBI/prime-video-enhancer/blob/main/SUPPORT.md
+    about: Check common setup and compatibility guidance before opening an issue.

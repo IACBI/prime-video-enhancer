@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible problem with the Windows helper or Android app.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include passwords, cookies, tokens, account information, or unredacted logs. For security issues, use the private process in SECURITY.md instead.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows desktop helper
+        - Android app
+        - iOS source build
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App or release version
+      placeholder: "For example: v3.6.7"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed result and the result you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS version, Edge or WebView version, and region only when relevant. Redact personal data.
+    validations:
+      required: true
