@@ -1,3 +1,11 @@
+# 🚀 Prime Video Enhancer v3.6.5 — Official Flutter 3.x Native Project Structure
+
+## What's New in v3.6.5
+
+- **Official Native Flutter Android & iOS Project Structure:** Replaced hand-crafted legacy Groovy Gradle files with official Flutter 3.x Kotlin DSL (`.kts`) Gradle files, Gradle wrapper, Android X configuration (`gradle.properties`), and Xcode iOS workspace (`Runner.xcodeproj`). Eliminates all CI/CD Gradle build warnings and failures.
+
+---
+
 # 🚀 Prime Video Enhancer v3.6.4 — Native Flutter Project Initialization in CI/CD Workflow
 
 ## What's New in v3.6.4
