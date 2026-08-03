@@ -10,16 +10,41 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  build-windows:
+    name: Build Windows Executables
     runs-on: windows-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Build Single-File Executables
+        shell: pwsh
+        run: |
+          .\publish.cmd
+
+      - name: Upload Windows Light Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrimeVideoSpeedApp-Light
+          path: publish/Light/PrimeVideoSpeedApp.exe
+
+      - name: Upload Windows Standalone Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrimeVideoSpeedApp-Standalone
+          path: publish/Standalone/PrimeVideoSpeedApp.exe
+
+  build-android:
+    name: Build Android Mobile APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
@@ -32,37 +57,54 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Build Windows Executables
-        shell: pwsh
-        run: |
-          .\publish.cmd
-
-      - name: Build Android Mobile APK
-        shell: pwsh
+      - name: Build APK
         run: |
           cd mobile
           flutter pub get
           flutter build apk --release
 
-      - name: Prepare Release Artifacts
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item "publish/Light/PrimeVideoSpeedApp.exe" "dist/PrimeVideoSpeedApp-Light.exe"
-          Copy-Item "publish/Standalone/PrimeVideoSpeedApp.exe" "dist/PrimeVideoSpeedApp-Standalone.exe"
-          if (Test-Path "mobile/build/app/outputs/flutter-apk/app-release.apk") {
-            Copy-Item "mobile/build/app/outputs/flutter-apk/app-release.apk" "dist/PrimeVideoSpeedApp-Mobile.apk"
-          }
-
-      - name: Upload Artifacts to Workflow Run
-        uses: actions/upload-artifact@v7
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: PrimeVideoSpeedApp-Binaries
-          path: dist/*
+          name: PrimeVideoSpeedApp-Mobile
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Windows Light Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PrimeVideoSpeedApp-Light
+          path: dist-tmp/Light
+
+      - name: Download Windows Standalone Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PrimeVideoSpeedApp-Standalone
+          path: dist-tmp/Standalone
+
+      - name: Download Android Mobile Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PrimeVideoSpeedApp-Mobile
+          path: dist-tmp/Mobile
+
+      - name: Prepare Final Release Binaries
+        run: |
+          mkdir -p dist
+          cp dist-tmp/Light/PrimeVideoSpeedApp.exe dist/PrimeVideoSpeedApp-Light.exe
+          cp dist-tmp/Standalone/PrimeVideoSpeedApp.exe dist/PrimeVideoSpeedApp-Standalone.exe
+          cp dist-tmp/Mobile/app-release.apk dist/PrimeVideoSpeedApp-Mobile.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true

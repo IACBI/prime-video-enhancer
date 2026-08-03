@@ -1,3 +1,11 @@
+# Prime Video Enhancer v3.6.2 — Multi-Runner CI/CD Release Workflow Fix
+
+## What's New in v3.6.2
+
+- **Multi-Runner GitHub Release Workflow:** Resolved GitHub Actions release build failure by splitting Windows executable compilation (`windows-latest`) and Android APK compilation (`ubuntu-latest` with pre-installed Android SDK). Releases now reliably attach all three binaries: `PrimeVideoSpeedApp-Light.exe`, `PrimeVideoSpeedApp-Standalone.exe`, and `PrimeVideoSpeedApp-Mobile.apk`.
+
+---
+
 # Prime Video Enhancer v3.6.1 — Uncapped Subtitle Size Scaling Fix
 
 ## What's New in v3.6.1

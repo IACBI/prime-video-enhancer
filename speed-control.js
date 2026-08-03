@@ -101,7 +101,7 @@
 
   const previousControl = window.__primeVideoSpeedControl;
   if (previousControl?.installed) {
-    if (previousControl.version === "3.6.1") {
+    if (previousControl.version === "3.6.2") {
       previousControl.refresh();
       previousControl.applySpeed();
       previousControl.applySubtitleStyles();
@@ -1605,7 +1605,7 @@
 
   const controlApi = {
     installed: true,
-    version: "3.6.1",
+    version: "3.6.2",
     applySpeed,
     refresh,
     applySubtitleStyles,
