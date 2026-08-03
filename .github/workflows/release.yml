@@ -60,6 +60,7 @@ jobs:
       - name: Build APK
         run: |
           cd mobile
+          flutter create --org com.iacbi.primevideoenhancer .
           flutter pub get
           flutter build apk --release
 

@@ -1,3 +1,11 @@
+# 🚀 Prime Video Enhancer v3.6.4 — Native Flutter Project Initialization in CI/CD Workflow
+
+## What's New in v3.6.4
+
+- **Native Flutter Project Bootstrap in CI:** Updated `.github/workflows/release.yml` to run `flutter create --org com.iacbi.primevideoenhancer .` prior to building the APK. This dynamically synthesizes full, up-to-date native Android & iOS Gradle/Xcode project files matching the exact Flutter SDK version on the CI runner, eliminating Gradle version mismatch errors.
+
+---
+
 # 🚀 Prime Video Enhancer v3.6.3 — Hardened Mobile Android Gradle Build & Workflow Fix
 
 ## What's New in v3.6.3
