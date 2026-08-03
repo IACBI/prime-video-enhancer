@@ -99,9 +99,25 @@ jobs:
       - name: Prepare Final Release Binaries
         run: |
           mkdir -p dist
-          cp dist-tmp/Light/PrimeVideoSpeedApp.exe dist/PrimeVideoSpeedApp-Light.exe
-          cp dist-tmp/Standalone/PrimeVideoSpeedApp.exe dist/PrimeVideoSpeedApp-Standalone.exe
-          cp dist-tmp/Mobile/app-release.apk dist/PrimeVideoSpeedApp-Mobile.apk
+          find dist-tmp/ -type f
+          if [ -f dist-tmp/Light/PrimeVideoSpeedApp.exe ]; then
+            cp dist-tmp/Light/PrimeVideoSpeedApp.exe dist/PrimeVideoSpeedApp-Light.exe
+          else
+            cp dist-tmp/Light/* dist/PrimeVideoSpeedApp-Light.exe
+          fi
+
+          if [ -f dist-tmp/Standalone/PrimeVideoSpeedApp.exe ]; then
+            cp dist-tmp/Standalone/PrimeVideoSpeedApp.exe dist/PrimeVideoSpeedApp-Standalone.exe
+          else
+            cp dist-tmp/Standalone/* dist/PrimeVideoSpeedApp-Standalone.exe
+          fi
+
+          if [ -f dist-tmp/Mobile/app-release.apk ]; then
+            cp dist-tmp/Mobile/app-release.apk dist/PrimeVideoSpeedApp-Mobile.apk
+          else
+            cp dist-tmp/Mobile/* dist/PrimeVideoSpeedApp-Mobile.apk
+          fi
+          ls -la dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

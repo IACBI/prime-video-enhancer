@@ -1,3 +1,12 @@
+# 🚀 Prime Video Enhancer v3.6.3 — Hardened Mobile Android Gradle Build & Workflow Fix
+
+## What's New in v3.6.3
+
+- **Complete Android Gradle Configuration:** Added missing `android/build.gradle`, `android/settings.gradle`, `android/app/build.gradle`, and Kotlin `MainActivity.kt` files to the `mobile/` directory. Flutter Android APK compilation now succeeds 100% cleanly on both local machines and GitHub Actions CI.
+- **Robust Artifact Packaging:** Updated `release.yml` with resilient artifact path resolution for `PrimeVideoSpeedApp-Light.exe`, `PrimeVideoSpeedApp-Standalone.exe`, and `PrimeVideoSpeedApp-Mobile.apk`.
+
+---
+
 # Prime Video Enhancer v3.6.2 — Multi-Runner CI/CD Release Workflow Fix
 
 ## What's New in v3.6.2

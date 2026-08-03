@@ -585,7 +585,7 @@ internal static class CdpPayloads
 {
     // Must match the version exported by speed-control.js. Version drift either
     // causes needless reinjection or prevents a corrected script from loading.
-    private const string ScriptVersion = "3.6.2";
+    private const string ScriptVersion = "3.6.3";
 
     public static readonly byte[] EnableNetwork = Serialize(new
     {
