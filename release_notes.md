@@ -1,3 +1,17 @@
+# Prime Video Enhancer v3.5.5 — Subtitle Style Flash Elimination & Proportional Scaling
+
+## What's New in v3.5.5
+
+- **Zero Subtitle Flash:** Added a synchronous fast-path inside the `MutationObserver` callback. When new subtitle elements are injected by Prime Video, our custom styles are applied immediately in the microtask queue before the browser paints, completely eliminating the initial flash of Amazon's default font size and color.
+- **Proportional Font Size Scaling (`computeSubtitleSizeVh`):** Subtitle font size is now calculated using a calibrated viewport-relative (`vh`) formula (`100% = 1.85vh`). This ensures consistent font proportions across all window sizes and fullscreen modes without compounding with Prime Video's container styles or overflowing the player at `%200` setting.
+- **Background & Shadow Rendering Fixes:**
+  - Container element backgrounds (`.atvwebplayersdk-subtitle-text`) are cleared to `transparent !important` when child text elements are styled, eliminating double-background box artifacts.
+  - Added `line-height: 1.35 !important`, `padding: 0.12em 0.35em !important`, `border-radius: 4px !important`, `-webkit-box-decoration-break: clone !important`, and `box-decoration-break: clone !important` to ensure text lines never overlap and background boxes render with smooth, uniform corners across line wraps.
+  - Text shadows scale dynamically with font size and render a crisp stroke outline in `None (Transparent)` background mode.
+- Includes all packaging, CDP, ad shield, and subtitle isolation features from v3.5.4.
+
+---
+
 # Prime Video Enhancer v3.5.4 — Packaging & Release Maintenance
 
 ## What's New in v3.5.4
