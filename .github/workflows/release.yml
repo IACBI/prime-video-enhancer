@@ -15,10 +15,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -28,13 +28,13 @@ jobs:
           .\publish.cmd
 
       - name: Upload Windows Light Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PrimeVideoSpeedApp-Light
           path: publish/Light/PrimeVideoSpeedApp.exe
 
       - name: Upload Windows Standalone Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PrimeVideoSpeedApp-Standalone
           path: publish/Standalone/PrimeVideoSpeedApp.exe
@@ -44,10 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Java JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -64,7 +64,7 @@ jobs:
           flutter build apk --release
 
       - name: Upload Android APK Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PrimeVideoSpeedApp-Mobile
           path: mobile/build/app/outputs/flutter-apk/app-release.apk
@@ -76,22 +76,22 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download Windows Light Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: PrimeVideoSpeedApp-Light
           path: dist-tmp/Light
 
       - name: Download Windows Standalone Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: PrimeVideoSpeedApp-Standalone
           path: dist-tmp/Standalone
 
       - name: Download Android Mobile Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: PrimeVideoSpeedApp-Mobile
           path: dist-tmp/Mobile
