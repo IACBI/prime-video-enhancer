@@ -47,6 +47,7 @@ In addition to multi-layer subtitle stabilization (defaulting to **Yellow `#FFCC
 - Lets you drag the floating button to a comfortable place on screen.
 - Remembers selected speed, button position, subtitle color, size, background, and toggle state locally.
 - Reapplies settings automatically if Prime Video resets the video element or subtitle tracks.
+- **📱 Mobile Support (Android APK & iOS):** Includes a Flutter-based mobile app under [`mobile/`](mobile/) that wraps Prime Video in a custom WebView with network-level ad blocking and a touch-optimized bottom-sheet control menu.
 
 ### What It Does Not Do
 
@@ -157,7 +158,7 @@ Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde
   - **`1.2x ⚡`** altyazı özelleştirmesi KAPALI olduğunda (sadece hız kontrolü aktif).
 - **Özel Görev Çubuğu ve Pencere İkonu:** Win32 COM arayüzü kullanılarak sadece adanmış `msedge.exe` pencerelerine `AppUserModelID` (`PrimeVideoSpeedController.App`) atanır ve görev çubuğunda kusursuz bir gruplama sağlanır.
 - **Gelişmiş Altyazı Özelleştirici:**
-  - **Renk:** 5 renk önayarı — Sarı (`#FFCC00`), Altın (`#FFD700`), Beyaz (`#FFFFFF`), Yeşil (`#00FF66`), Mavi (`#00FFFF`).
+  - **Renk:** 5 renk önayarı — Sarı (`#FFCC00`), Altın (`#FFD700`), Beyaz (`#FFFFFF`), Yeşil (`#00FF66`), Siyan (`#00FFFF`).
   - **Boyut:** **Boyut (Size)** kutusuna **%50 ile %400** arasında istenilen yüzde değeri yazılıp Enter'a basılabilir.
   - **Arka Plan:** **Bg** butonuna basılarak arka plan modu seçilebilir: **Shadow** (yarı saydam koyu kutu), **Solid** (opak siyah kutu), **None** (şeffaf). Stil yalnızca aktif videonun alt altyazı bölgesinde doğrulanan gerçek metin öğelerine uygulanır; bölüm adı ve oynatıcı arayüzü etkilenmez.
   - `MutationObserver` sayesinde bölüm geçişlerinde ve DOM yenilenmelerinde ayarlar korunur; artık altyazı olmayan öğelerin özgün inline stilleri geri yüklenir.
@@ -165,6 +166,7 @@ Prime Video Speed & Subtitle Controller, Prime Video'yu Microsoft Edge üzerinde
 - Buton sürüklenerek ekranda istenilen yere taşınabilir.
 - Tercihleri (hız, konum, renk, boyut, arka plan, açık/kapalı durumu) yerel olarak `localStorage` üzerinde saklar.
 - Oynatıcı veya altyazı parçası yenilendiğinde tercihleri anında yeniden uygular.
+- **📱 Mobil Desteği (Android APK ve iOS):** [`mobile/`](mobile/) klasöründe Prime Video'yu ağ düzeyinde reklam engelleme ve dokunmatik alt menü (bottom-sheet) ile özel bir WebView içinde açan Flutter tabanlı mobil uygulama içerir.
 
 ### Ne Yapmaz
 
@@ -263,7 +265,7 @@ Además de la personalización avanzada de subtítulos, este proyecto incluye un
 
 - Abre Prime Video en una ventana dedicada de Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Muestra el control flotante (`1.2x ●` / `1.2x ⚡`) únicamente durante la reproducción de vídeo.
-- **Escudo de Anuncios de 5 Capas (`🛡️ Reklam Kalkanı`):**
+- **Escudo de Anuncios de 5 Capas (`🛡️ Escudo de Anuncios`):**
   - **Capa 1 (Intercepción CDP Fetch):** Bloquea los anuncios en la fase de solicitud antes de que se cargue un solo byte. Devuelve respuestas XML VAST/VPAID vacías para anuncios integrados.
   - **Capa 2 (Bloqueo de Red y Rastreadores):** Bloquea servidores de publicidad de Amazon (`amazon-adsystem.com`), telemetría y rastreadores (`Network.setBlockedURLs`).
   - **Capa 3 (Destrucción de Banners y Contadores CSS):** Oculta permanentemente avisos de "Anuncio 1 de 2", banners temporizadores y superposiciones (`opacity: 0 !important`).
@@ -277,11 +279,12 @@ Además de la personalización avanzada de subtítulos, este proyecto incluye un
 - **Personalizador de Subtítulos Multicapa:**
   - **Color:** 5 colores preestablecidos — Amarillo (`#FFCC00`), Dorado (`#FFD700`), Blanco (`#FFFFFF`), Verde (`#00FF66`), Cian (`#00FFFF`).
   - **Tamaño:** Introduce cualquier porcentaje entre **50% y 400%** en la casilla **Size** y pulsa Enter.
-  - **Fondo:** Pulsa **Bg** para alternar: **Shadow** (caja oscura translúcida), **Solid** (caja negra opaca), **None** (transparente). La inyección directa de estilo en línea garantiza superar los estilos propios de Prime Video.
+  - **Fondo:** Pulsa **Bg** para alternar: **Shadow** (caja oscura translúcida), **Solid** (caja negra opaca), **None** (transparente). Los estilos se aplican únicamente a elementos de texto verificados dentro de la región inferior de subtítulos del vídeo activo, manteniendo intactos los títulos de episodios y la interfaz del reproductor.
   - Persistente entre episodios mediante `MutationObserver` e inyección de estilos en línea.
 - Incluye ajustes preestablecidos de velocidad (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) y ajustes finos (`+` / `-` de `0.25x` a `4.0x`).
 - Permite arrastrar libremente el botón flotante en la pantalla.
 - Recuerda localmente la velocidad, la posición del botón, el color, el tamaño, el fondo y el estado en `localStorage`.
+- **📱 Soporte Móvil (Android APK e iOS):** Incluye una aplicación móvil basada en Flutter en [`mobile/`](mobile/) que ejecuta Prime Video en un WebView personalizado con bloqueo de anuncios a nivel de red y un menú inferior táctil.
 
 ### Qué No Hace
 
@@ -329,6 +332,13 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
+Ejecute la suite de pruebas de regresión sin dependencias con:
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+Con la aplicación en ejecución, `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` realiza una prueba CDP en vivo que verifica el aislamiento de subtítulos y confirma que el controlador no se reinyecta.
+
 #### Generación automática de ejecutables de archivo único (Arquitectura Híbrida)
 Gracias a nuestra **Arquitectura de Prioridad Híbrida**, los archivos `speed-control.js` y `AppIcon.ico` se leen externamente si existen, O BIEN se cargan como recursos incrustados (`<EmbeddedResource>`) si se ejecuta como un archivo único.
 
@@ -372,7 +382,7 @@ Zusätzlich zur erweiterten Untertitel-Anpassung bietet dieses Projekt einen **5
 
 - Öffnet Prime Video in einem dedizierten Microsoft-Edge-Fenster (`--remote-debugging-address=127.0.0.1`).
 - Zeigt den Geschwindigkeits- & Untertitelbutton (`1.2x ●` / `1.2x ⚡`) nur während der Videowiedergabe an.
-- **5-stufiger Werbeschutz (`🛡️ Reklam Kalkanı`):**
+- **5-stufiger Werbeschutz (`🛡️ Werbeschutz`):**
   - **Stufe 1 (CDP-Fetch-Abfangen):** Blockiert Werbung in der Anfragephase vor dem Laden. Liefert leere VAST/VPAID-XML-Antworten.
   - **Stufe 2 (Netzwerk- & Tracker-Blocker):** Blockiert Amazon-Werbeserver (`amazon-adsystem.com`), Telemetrie und Tracking-Netzwerke (`Network.setBlockedURLs`).
   - **Stufe 3 (CSS-Banner & Countdown-Zerstörer):** Entfernt „Werbung 1 von 2“-Hinweise und Overlays dauerhaft (`opacity: 0 !important`).
@@ -386,11 +396,12 @@ Zusätzlich zur erweiterten Untertitel-Anpassung bietet dieses Projekt einen **5
 - **Erweiterter Untertitel-Anpasser:**
   - **Farbe:** 5 Voreinstellungen — Gelb (`#FFCC00`), Gold (`#FFD700`), Weiß (`#FFFFFF`), Grün (`#00FF66`), Cyan (`#00FFFF`).
   - **Größe:** Beliebigen Prozentwert von **50% bis 400%** im Feld **Size** eingeben und Eingabe drücken.
-  - **Hintergrund:** Auf **Bg** klicken für: **Shadow** (halbtransparente dunkle Box), **Solid** (deckend schwarze Box), **None** (transparent). Inline-Style-Injektion garantiert Vorrang vor Prime Video.
+  - **Hintergrund:** Auf **Bg** klicken für: **Shadow** (halbtransparente dunkle Box), **Solid** (deckend schwarze Box), **None** (transparent). Styles werden nur auf verifizierte Textelemente im unteren Untertitelbereich des aktiven Videos angewendet, sodass Episodentitel und Player-UI unberührt bleiben.
   - Dauerhaft über Episoden hinweg via `MutationObserver` und Inline-Style-Injektion.
 - Enthält gängige Geschwindigkeits-Voreinstellungen (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) sowie Feinabstimmung (`+` / `-` von `0.25x` bis `4.0x`).
 - Der Button lässt sich per Drag & Drop frei verschieben.
 - Speichert alle Einstellungen (Geschwindigkeit, Position, Farbe, Größe, Hintergrund, Status) in `localStorage`.
+- **📱 Mobile Unterstützung (Android APK & iOS):** Enthält eine Flutter-basierte mobile App unter [`mobile/`](mobile/), die Prime Video in einer benutzerdefinierten WebView mit Ad-Blocking auf Netzwerkebene und einem Touch-optimierten Bottom-Sheet-Menü ausführt.
 
 ### Was dieses Tool nicht tut
 
@@ -438,6 +449,13 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
+Führen Sie die abhängigkeitsfreie Regressions-Testsuite aus mit:
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+Bei laufender App führt `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` einen Live-CDP-Smoke-Test durch, der die Untertitelisolierung verifiziert und bestätigt, dass der Controller nicht erneut injiziert wird.
+
 #### Automatische Erstellung von Single-File-Ausführungsdateien (Hybride Architektur)
 Dank unserer **Hybriden Prioritätsarchitektur** werden `speed-control.js` und `AppIcon.ico` extern geladen ODER als `<EmbeddedResource>` abgerufen.
 
@@ -481,7 +499,7 @@ En plus de la personnalisation avancée des sous-titres, ce projet intègre un *
 
 - Ouvre Prime Video dans une fenêtre Microsoft Edge dédiée (`--remote-debugging-address=127.0.0.1`).
 - Affiche le bouton de contrôle (`1.2x ●` / `1.2x ⚡`) uniquement lorsque la vidéo est disponible.
-- **Bouclier Anti-Pub à 5 Niveaux (`🛡️ Reklam Kalkanı`):**
+- **Bouclier Anti-Pub à 5 Niveaux (`🛡️ Bouclier Anti-Pub`):**
   - **Niveau 1 (Interception CDP Fetch):** Bloque les publicités dès la phase de requête avant tout chargement.
   - **Niveau 2 (Blocage Réseau et Traqueurs):** Bloque les serveurs publicitaires d'Amazon (`amazon-adsystem.com`), la télémétrie et les traqueurs (`Network.setBlockedURLs`).
   - **Niveau 3 (Suppression des Bannières et Comptes à Rebours):** Masque définitivement les bannières et superpositions (`opacity: 0 !important`).
@@ -495,11 +513,12 @@ En plus de la personnalisation avancée des sous-titres, ce projet intègre un *
 - **Personnalisateur de Sous-titres Multicouche:**
   - **Couleur:** 5 préréglages — Jaune (`#FFCC00`), Or (`#FFD700`), Blanc (`#FFFFFF`), Vert (`#00FF66`), Cyan (`#00FFFF`).
   - **Taille:** Saisissez un pourcentage de **50% à 400%** dans le champ **Size** et appuyez sur Entrée.
-  - **Fond:** Cliquez sur **Bg** pour alterner: **Shadow** (boîte sombre semi-transparente), **Solid** (boîte noire opaque), **None** (transparent). L'injection de style en ligne garantit le remplacement des styles de Prime Video.
+  - **Fond:** Cliquez sur **Bg** pour alterner: **Shadow** (boîte sombre semi-transparente), **Solid** (boîte noire opaque), **None** (transparent). Les styles sont appliqués uniquement aux éléments de texte vérifiés dans la région inférieure des sous-titres de la vidéo active, laissant les titres d'épisodes et l'interface du lecteur intacts.
   - Persistant d'un épisode à l'autre via `MutationObserver` et injection de style en ligne.
 - Préréglages de vitesse courants (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) et réglage précis (`+` / `-` de `0.25x` à `4.0x`).
 - Déplacement libre du bouton par glisser-déposer.
 - Mémorisation locale de la vitesse, position, couleur, taille, fond et état dans `localStorage`.
+- **📱 Support Mobile (Android APK & iOS):** Inclus une application mobile basée sur Flutter sous [`mobile/`](mobile/) qui exécute Prime Video dans un WebView personnalisé avec blocage des publicités au niveau réseau et un menu inférieur tactile.
 
 ### Ce qu'il ne fait pas
 
@@ -547,6 +566,13 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
+Exécutez la suite de tests de régression sans dépendance avec:
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+Avec l'application en cours d'exécution, `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` effectue un test de fumée CDP en direct qui vérifie l'isolation des sous-titres et confirme que le contrôleur n'est pas réinjecté.
+
 #### Génération automatique d'exécutables à fichier unique (Architecture Hybride)
 Grâce à notre **Architecture à Priorité Hybride**, `speed-control.js` et `AppIcon.ico` sont lus en priorité depuis le dossier externe s'ils sont présents, OU chargés depuis `<EmbeddedResource>`.
 
@@ -590,7 +616,7 @@ Além da personalização avançada de legendas, este projeto possui um **Escudo
 
 - Abre o Prime Video em uma janela dedicada do Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Exibe o controle flutuante (`1.2x ●` / `1.2x ⚡`) exclusivamente durante a reprodução de vídeo.
-- **Escudo de 5 Camadas de Zero Visibilidade (`🛡️ Reklam Kalkanı`):**
+- **Escudo de 5 Camadas de Zero Visibilidade (`🛡️ Escudo de Anúncios`):**
   - **Camada 1 (Interceptação CDP Fetch):** Bloqueia anúncios antes de qualquer carregamento.
   - **Camada 2 (Bloqueador de Rede e Rastreadores):** Bloqueia servidores de anúncios da Amazon (`amazon-adsystem.com`), telemetria e rastreadores (`Network.setBlockedURLs`).
   - **Camada 3 (Destruidor de Banners e Contadores CSS):** Oculta permanentemente banners e sobreposições (`opacity: 0 !important`).
@@ -604,11 +630,12 @@ Além da personalização avançada de legendas, este projeto possui um **Escudo
 - **Personalizador de Legendas Multicamada:**
   - **Cor:** 5 cores predefinidas — Amarelo (`#FFCC00`), Dourado (`#FFD700`), Branco (`#FFFFFF`), Verde (`#00FF66`), Ciano (`#00FFFF`).
   - **Tamanho:** Digite um valor de **50% a 400%** no campo **Size** e pressione Enter.
-  - **Fundo:** Clique em **Bg** para alternar: **Shadow** (caixa escura semitransparente), **Solid** (caixa preta opaca), **None** (transparente). Injeção direta de estilo inline garante sobressair aos estilos do Prime Video.
+  - **Fundo:** Clique em **Bg** para alternar: **Shadow** (caixa escura semitransparente), **Solid** (caixa preta opaca), **None** (transparente). Os estilos são aplicados apenas a elementos de texto verificados na região inferior de legendas do vídeo ativo, garantindo que os títulos dos episódios e a interface do reprodutor permaneçam intactos.
   - Persistente entre episódios via `MutationObserver` e injeção de estilo inline.
 - Predefinições de velocidade (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) e ajustes finos (`+` / `-` de `0.25x` a `4.0x`).
 - Arraste o botão flutuante livremente na tela.
 - Lembra velocidade, posição, cor, tamanho, fundo e estado no `localStorage`.
+- **📱 Suporte Móvil (Android APK e iOS):** Inclui um aplicativo móvel baseado em Flutter em [`mobile/`](mobile/) que executa o Prime Video em uma WebView personalizada com bloqueio de anúncios em nível de rede e um menu inferior tátil.
 
 ### O Que Não Faz
 
@@ -656,7 +683,14 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
-#### Geração automática de executáveis de arquivo único (Arquitetura Híbrida)
+Execute a suíte de testes de regressão sem dependências com:
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+Com o aplicativo em execução, `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` executa um teste de fumaça CDP ao vivo que verifica o isolamento de legendas e confirma que o controlador não é reinjetado.
+
+#### Geração automática de executables de arquivo único (Arquitetura Híbrida)
 Graças à nossa **Arquitetura de Prioridade Híbrida**, `speed-control.js` e `AppIcon.ico` são lidos externamente OU carregados de `<EmbeddedResource>`.
 
 Para gerar os arquivos `.exe` para o GitHub Releases:
@@ -699,7 +733,7 @@ Prime Video Speed & Subtitle Controller 是一个开源、轻量级的 Windows �
 
 - 在专用的 Microsoft Edge 独立窗口 (`--remote-debugging-address=127.0.0.1`) 中打开 Prime Video。
 - 仅在视频播放器准备就绪时显示悬浮按钮 (`1.2x ●` / `1.2x ⚡`)。
-- **5层零可见广告屏蔽盾 (`🛡️ Reklam Kalkanı`):**
+- **5层零可见广告屏蔽盾 (`🛡️ 广告屏蔽盾`):**
   - **第 1 层 (CDP Fetch 请求拦截):** 在请求阶段拦截广告，返回空的 VAST/VPAID XML 响应。
   - **第 2 层 (网络广告与跟踪拦截):** 拦截 Amazon 广告服务器 (`amazon-adsystem.com`)、遥测及追踪请求 (`Network.setBlockedURLs`)。
   - **第 3 层 (CSS 广告横幅消灭):** 永久隐藏“广告 1/2”倒计时提示及弹窗 (`opacity: 0 !important`)。
@@ -713,13 +747,14 @@ Prime Video Speed & Subtitle Controller 是一个开源、轻量级的 Windows �
 - **高级字幕自定义器:**
   - **颜色：** 5 种预设 — 黄色 (`#FFCC00`)、金色 (`#FFD700`)、纯白 (`#FFFFFF`)、荧光绿 (`#00FF66`)、青蓝 (`#00FFFF`)。
   - **尺寸：** 在 **Size** 输入框中输入 **50% 至 400%** 的任意数值并按回车。
-  - **背景：** 点击 **Bg** 按钮切换：**Shadow** (半透明暗色背景)、**Solid** (不透明黑色背景)、**None** (透明背景)。内联样式直接注入，确保覆盖 Prime Video 自带样式。
+  - **背景：** 点击 **Bg** 按钮切换：**Shadow** (半透明暗色背景)、**Solid** (不透明黑色背景)、**None** (透明背景)。样式仅应用于当前活动视频下方字幕区域内经过验证的文本元素，剧集标题和播放器界面不受影响。
   - 通过 `MutationObserver` 和内联样式注入，在剧集切换时保持持久生效。
 - 内置常用倍速预设 (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) 及精细调节按钮 (`+` / `-`)。
 - 支持自由拖动悬浮按钮坐标。
 - 将倍速、坐标、字幕颜色、尺寸、背景及开关状态本地存储于 `localStorage`。
+- **📱 移动端支持 (Android APK & iOS):** 包含位于 [`mobile/`](mobile/) 目录下的 Flutter 移动应用程序，通过自定义 WebView 封装 Prime Video，提供网络级广告拦截与触控优化的底部弹出控制菜单。
 
-### 它不做什么
+### 本工具不具备的功能
 
 - 不会修改官方 Prime Video 桌面客户端文件。
 - 不会破解 DRM 版权保护、解除限制或下载视频。
@@ -765,6 +800,13 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
+运行无依赖项的回归测试套件：
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+在应用程序运行状态下，运行 `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` 可执行实时 CDP 冒烟测试，验证字幕隔离性并确认控制器不会重复注入。
+
 #### 单文件可执行程序(`.exe`)自动生成（混合优先架构）
 借助我们的**混合优先架构**，`speed-control.js` 与 `AppIcon.ico` 支持外部读取或嵌入资源 (`<EmbeddedResource>`) 加载。
 
@@ -808,7 +850,7 @@ Prime Video Speed & Subtitle Controller विंडोज़ के लिए �
 
 - Prime Video को समर्पित Microsoft Edge विंडो (`--remote-debugging-address=127.0.0.1`) में खोलता है।
 - स्पीड और सबटाइटल बटन (`1.2x ●` / `1.2x ⚡`) केवल वीडियो चलने पर दिखाता है।
-- **5-Layer Zero-Visibility Ad Shield (`🛡️ Reklam Kalkanı`):**
+- **5-Layer Zero-Visibility Ad Shield (`🛡️ एड शील्ड`):**
   - **लेयर 1 (CDP Fetch):** विज्ञापनों को लोड होने से पहले अनुरोध चरण में ही ब्लॉक करता है।
   - **लेयर 2 (नेटवर्क ब्लॉकर):** Amazon विज्ञापन सर्वर और ट्रैकर को रोकता है।
   - **लेयर 3 (बैनर रिमूवर):** "Ad 1 of 2" और काउंटडाउन बैनर छुपाता है।
@@ -822,6 +864,7 @@ Prime Video Speed & Subtitle Controller विंडोज़ के लिए �
   - **बैकग्राउंड (Bg):** **Bg** पर क्लिक करें: **Shadow** (हल्का काला), **Solid** (गहरा काला), **None** (पारदर्शी)।
 - स्पीड प्रीसेट (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) और बारीक समायोजन (`+` / `-`) शामिल हैं।
 - सेटिंग्स को स्थानीय `localStorage` में सुरक्षित रखता है।
+- **📱 मोबाइल सपोर्ट (Android APK & iOS):** [`mobile/`](mobile/) के तहत Flutter-आधारित मोबाइल ऐप शामिल है जो नेटवर्क-स्तरीय विज्ञापन ब्लॉकिंग और स्पर्श-अनुकूलित बॉटम-शीट मेनू के साथ कस्टम WebView में Prime Video चलाता है।
 
 ### यह क्या नहीं करता है
 
@@ -897,7 +940,7 @@ Prime Video Speed & Subtitle Controller هو أداة مفتوحة المصدر 
 
 - يفتح Prime Video في نافذة Microsoft Edge مخصصة (`--remote-debugging-address=127.0.0.1`).
 - يظهر زر التحكم (`1.2x ●` / `1.2x ⚡`) فقط أثناء تشغيل الفيديو.
-- **درع إعلانات مخفي من 5 طبقات (`🛡️ Reklam Kalkanı`):**
+- **درع إعلانات مخفي من 5 طبقات (`🛡️ درع الإعلانات`):**
   - **الطبقة 1 (اعتراض CDP Fetch):** يحجب الإعلانات في مرحلة الطلب قبل التحميل.
   - **الطبقة 2 (حجب الخوادم شبكياً):** يحجب خوادم إعلانات Amazon والتتبع.
   - **الطبقة 3 (إزالة اللافتات):** يخفي لافتات الإعلانات والعد التنازلي.
@@ -905,11 +948,12 @@ Prime Video Speed & Subtitle Controller هو أداة مفتوحة المصدر 
   - **الطبقة 5 (التخطي والتسريع 30x):** ينقر على "تخطي الإعلان" أو يسرع الإعلان إلى `30x` مع رجوع تلقائي إلى `16x`.
 - **الإخفاء التلقائي الذكي:** يختفي الزر بعد ثانيتين من التشغيل أو توقف الماوس.
 - **تخصيص الترجمة المتقدم:**
-  - **اللون:** 5 ألوان جاهزة — الأصفر (`#FFCC00`)، الذهبي (`#FFD700`)، الأبيض (`#FFFFFF`)، الأخضر (`#00FF66`)، الأزرق (`#00FFFF`).
+  - **اللون:** 5 ألوان جاهزة — الأصفر (`#FFCC00`)، الذهبي (`#FFD700`)، الأبيض (`#FFFFFF`)، الأخضر (`#00FF66`)، السياني (`#00FFFF`).
   - **الحجم:** أدخل أي نسبة من **50% إلى 400%** في مربع **Size** واضغط Enter.
-  - **الخلفية:** انقر على **Bg** للتبديل: **Shadow** (خلفية داكنة شبه شفافة)، **Solid** (خلفية سوداء معتمة)، **None** (شفافة).
+  - **الخلفية:** انقر على **Bg** للتبديل: **Shadow** (خلفية داكنة شبه شفافة)، **Solid** (خلفية سوداء معتمة)، **None** (شفافة). تطبق الأنماط فقط على نصوص منطقة الترجمة السفلى المعتمدة في الفيديو النشط، مع بقاء عناوين الحلقات وواجهة المشغل كما هي.
 - يتضمن إعدادات سرعة مسبقة (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) وأزرار ضبط دقيقة (`+` / `-`).
 - يحفظ التفضيلات محلياً في `localStorage`.
+- **📱 دعم الهاتف المحمول (Android APK و iOS):** يتضمن تطبيقًا للهاتف المحمول يستند إلى Flutter ضمن [`mobile/`](mobile/) يعمل على تشغيل Prime Video في WebView مخصص مع حجب الإعلانات على مستوى الشبكة وقائمة سفلية تعمل باللمس.
 
 ### ما لا يفعله البرنامج
 
@@ -957,6 +1001,13 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
+تشغيل مجموعة اختبارات التراجع:
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+أثناء تشغيل التطبيق، ينفذ `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` اختبار دخان CDP مباشر للتحقق من عزل الترجمة وتأكيد عدم إعادة الحقن.
+
 #### إنشاء ملفات تشغيل وحيدة ومستقلة
 قم بتشغيل `publish.cmd` لإنشاء الملفات في مجلد `publish/`:
 - **`publish/Light/PrimeVideoSpeedApp.exe` (~213 KB)**
@@ -985,7 +1036,7 @@ Prime Video Speed & Subtitle Controller — это открытая легкая
 
 - Открывает Prime Video в отдельном окне Microsoft Edge (`--remote-debugging-address=127.0.0.1`).
 - Показывает кнопку управления (`1.2x ●` / `1.2x ⚡`) исключительно во время воспроизведения видео.
-- **5-уровневый рекламный щит нулевой видимости (`🛡️ Reklam Kalkanı`):**
+- **5-уровневый рекламный щит нулевой видимости (`🛡️ Рекламный щит`):**
   - **Уровень 1 (Перехват CDP Fetch):** Блокирует рекламные запросы до загрузки.
   - **Уровень 2 (Сетевая блокировка):** Блокирует серверы рекламы Amazon и трекеры (`Network.setBlockedURLs`).
   - **Уровень 3 (Удаление баннеров):** Скрывает рекламные надписи и таймеры (`opacity: 0 !important`).
@@ -994,11 +1045,12 @@ Prime Video Speed & Subtitle Controller — это открытая легкая
 - **Умное автоскрытие:** Через 2 секунды после начала видео или остановки мыши кнопка плавно исчезает.
 - **Компактный индикатор статуса:** Отображает скорость и статус субтитров.
 - **Расширенный настройщик субтитров:**
-  - **Цвет:** 5 пресетов — Желтый (`#FFCC00`), Золотой (`#FFD700`), Белый (`#FFFFFF`), Зеленый (`#00FF66`), Голубой (`#00FFFF`).
+  - **Цвет:** 5 пресетов — Желтый (`#FFCC00`), Золотой (`#FFD700`), Белый (`#FFFFFF`), Зеленый (`#00FF66`), Бирюзовый / Циан (`#00FFFF`).
   - **Размер:** Введите любое значение от **50% до 400%** в поле **Size** и нажмите Enter.
-  - **Фон:** Нажмите **Bg** для переключения: **Shadow** (полупрозрачный), **Solid** (непрозрачный черный), **None** (прозрачный). Инъекция инлайн-стилей гарантирует перекрытие стилей Prime Video.
+  - **Фон:** Нажмите **Bg** для переключения: **Shadow** (полупрозрачный), **Solid** (непрозрачный черный), **None** (прозрачный). Стиль применяется только к проверенным текстам в нижней области субтитров активного видео; названия серий и UI остаются нетронутыми.
 - Пресеты скорости (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) и точная настройка (`+` / `-`).
 - Сохраняет настройки в `localStorage`.
+- **📱 Поддержка мобильных устройств (Android APK и iOS):** Включает мобильное приложение на базе Flutter в [`mobile/`](mobile/), запускающее Prime Video в специальном WebView с сетевой блокировкой рекламы и сенсорным нижним меню.
 
 ### Чего утилита НЕ делает
 
@@ -1045,6 +1097,13 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
+Запустите набор тестов регрессии без зависимостей:
+```powershell
+dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
+node --check .\speed-control.js
+```
+При работающем приложении `node .\PrimeVideoSpeedApp.Tests\browser-smoke.js` выполняет CDP-тест в реальном времени, проверяющий изоляцию субтитров.
+
 #### Автоматическая генерация исполняемых файлов (.exe)
 Запустите `publish.cmd` для создания файлов в папке `publish/`:
 - **`publish/Light/PrimeVideoSpeedApp.exe` (~213 KB)**
@@ -1073,12 +1132,12 @@ Prime Video Speed & Subtitle Controller は、Windows 向けのオープンソ�
 
 - 専用の Microsoft Edge アプリウィンドウ (`--remote-debugging-address=127.0.0.1`) で Prime Video を開きます。
 - 再生速度および字幕ボタン (`1.2x ●` / `1.2x ⚡`) を動画再生中のみ表示します。
-- **5レイヤー広告遮断シールド (`🛡️ Reklam Kalkanı`):**
+- **5レイヤー広告遮断シールド (`🛡️ 広告シールド`):**
   - **レイヤー 1 (CDP Fetch):** リクエスト段階で広告を遮断します。
   - **レイヤー 2 (ネットワーク遮断):** Amazon 広告サーバーや追跡ドメインをブロックします。
   - **レイヤー 3 (CSS バナー削除):** カウントダウンやオーバーレイを消去します (`opacity: 0 !important`)。
   - **レイヤー 4 (カバー＆自動ミュート):** 音声を消音し映像をカバー。45秒セーフティバルブで誤作動を防ぎます。
-  - **レイヤー 5 (自動スキップ＆16倍速):** スキップボタンの自動クリックまたは 16倍速処理。
+  - **レイヤー 5 (自動スキップ＆30倍速):** スキップボタン自動クリックまたは `30倍速` 処理（スタック時自動 `16倍速` フォールバック）。
 - **再生中のスマート自動非表示:** 再生開始またはマウス停止の 2秒後にボタンがフェードアウトします。
 - **高度な字幕カスタマイザー:**
   - **カラー:** 5つのプリセット — イエロー (`#FFCC00`)、ゴールド (`#FFD700`)、ホワイト (`#FFFFFF`)、グリーン (`#00FF66`)、シアン (`#00FFFF`)。
@@ -1086,6 +1145,7 @@ Prime Video Speed & Subtitle Controller は、Windows 向けのオープンソ�
   - **背景:** **Bg** をクリックして切替: **Shadow** (半透明暗色)、**Solid** (不透明黒)、**None** (透明)。インラインスタイル注入により公式スタイルを確実に上書き。
 - 速度プリセット (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) および微調整 (`+` / `-`)。
 - 設定を `localStorage` に保持します。
+- **📱 モバイルサポート (Android APK & iOS):** [`mobile/`](mobile/) にネットワークレベルの広告ブロックとタッチ対応ボトムシートメニューを備えた WebView ベースの Flutter モバイルアプリを含みます。
 
 ### 行わないこと
 
@@ -1173,6 +1233,7 @@ Selain kustomisasi subtitle tingkat lanjut, proyek ini dilengkapi **Perisai Ikla
   - **Latar Belakang:** Klik **Bg** untuk beralih: **Shadow** (latar gelap transparan), **Solid** (latar hitam pekat), **None** (transparan). Penginjeksian gaya inline memastikan gaya bawaan Prime Video tertimpa.
 - Prasetel kecepatan (`0.5x`, `1x`, `1.25x`, `1.5x`, `1.75x`, `2x`) dan tombol penyesuaian presisi (`+` / `-`).
 - Menyimpan preferensi di `localStorage`.
+- **📱 Dukungan Seluler (Android APK & iOS):** Menyediakan aplikasi seluler berbasis Flutter di [`mobile/`](mobile/) yang menjalankan Prime Video dalam WebView kustom dengan pemblokiran iklan tingkat jaringan dan menu kontrol geser bawah yang dioptimalkan untuk sentuhan.
 
 ### Apa Yang Tidak Dilakukan
 

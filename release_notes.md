@@ -1,3 +1,20 @@
+# 🚀 Prime Video Enhancer v3.6.0 — Mobile Port (Android & iOS) & Security/Performance Optimization
+
+## What's New in v3.6.0
+
+### 📱 Full Mobile Platform Support (Android APK & iOS)
+- Added cross-platform Flutter mobile application under [`mobile/`](mobile/) for Android and iOS.
+- **Network-Level Mobile Ad Shield:** Intercepts and blocks Amazon ad/telemetry host requests (`amazon-adsystem.com`, `unagi`, `mads`, `aan.amazon.co.*`) directly inside native mobile WebViews.
+- **Touch-Optimized Bottom Sheet:** Responsive `@media (max-width: 768px)` menu transforms the floating control badge (`1.2x ⚡`) into a single-thumb touch drawer.
+- **Automated CI/CD Release Pipeline:** GitHub Actions workflow (`release.yml`) now automatically builds and attaches `PrimeVideoSpeedApp-Mobile.apk` alongside `Light` and `Standalone` Windows executables on every release.
+
+### 🔒 Security & Performance Hardening
+- **Native Chrome UserScript Injection:** Uses `UserScriptInjectionTime.AT_DOCUMENT_START` for instant script injection without IPC message overhead.
+- **Hardened Security Constraints:** Enforces `MIXED_CONTENT_NEVER_ALLOW`, disables file URL access exploits, and validates HTTP/HTTPS URI schemes.
+- **Documentation Audit:** Multi-language documentation across 12 languages updated and synchronized.
+
+---
+
 # Prime Video Enhancer v3.5.5 — Subtitle Style Flash Elimination & Proportional Scaling
 
 ## What's New in v3.5.5

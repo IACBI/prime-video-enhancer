@@ -70,17 +70,10 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
     }
   }
 
-  Future<void> _injectControllerScript() async {
-    if (_webViewController == null || _injectedJsCode == null) return;
-    try {
-      await _webViewController!.evaluateJavascript(source: _injectedJsCode!);
-      debugPrint('[PVSC-Mobile] Injected speed-control.js successfully');
-    } catch (e) {
-      debugPrint('[PVSC-Mobile] Script injection error: $e');
-    }
-  }
-
   bool _isAdRequest(String url) {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return false;
+    }
     for (final pattern in _adHostPatterns) {
       if (pattern.hasMatch(url)) {
         return true;
@@ -100,6 +93,14 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
               initialUrlRequest: URLRequest(
                 url: WebUri('https://www.primevideo.com'),
               ),
+              initialUserScripts: _injectedJsCode != null
+                  ? UnmodifiableListView([
+                      UserScript(
+                        source: _injectedJsCode!,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                    ])
+                  : null,
               initialSettings: InAppWebViewSettings(
                 mediaPlaybackRequiresUserGesture: false,
                 allowsInlineMediaPlayback: true,
@@ -107,6 +108,11 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                 javaScriptEnabled: true,
                 domStorageEnabled: true,
                 databaseEnabled: true,
+                cacheEnabled: true,
+                clearCache: false,
+                mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
+                allowFileAccessFromFileURLs: false,
+                allowUniversalAccessFromFileURLs: false,
                 supportMultipleWindows: false,
                 userAgent:
                     'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
@@ -123,15 +129,19 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                 setState(() {
                   _loadingProgress = progress / 100.0;
                 });
-                if (progress > 60) {
-                  _injectControllerScript();
-                }
               },
               onLoadStop: (controller, url) async {
                 setState(() {
                   _isLoading = false;
                 });
-                await _injectControllerScript();
+                // Fallback reinjection check to ensure controller is initialized
+                if (_injectedJsCode != null) {
+                  try {
+                    await controller.evaluateJavascript(
+                      source: "if (!window.__primeVideoSpeedControl?.installed) { $_injectedJsCode }",
+                    );
+                  } catch (_) {}
+                }
               },
               shouldInterceptRequest: (controller, request) async {
                 final url = request.url.toString();

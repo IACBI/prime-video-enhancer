@@ -21,10 +21,28 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build Single-File Executables
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Build Windows Executables
         shell: pwsh
         run: |
           .\publish.cmd
+
+      - name: Build Android Mobile APK
+        shell: pwsh
+        run: |
+          cd mobile
+          flutter pub get
+          flutter build apk --release
 
       - name: Prepare Release Artifacts
         shell: pwsh
@@ -32,6 +50,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "publish/Light/PrimeVideoSpeedApp.exe" "dist/PrimeVideoSpeedApp-Light.exe"
           Copy-Item "publish/Standalone/PrimeVideoSpeedApp.exe" "dist/PrimeVideoSpeedApp-Standalone.exe"
+          if (Test-Path "mobile/build/app/outputs/flutter-apk/app-release.apk") {
+            Copy-Item "mobile/build/app/outputs/flutter-apk/app-release.apk" "dist/PrimeVideoSpeedApp-Mobile.apk"
+          }
 
       - name: Upload Artifacts to Workflow Run
         uses: actions/upload-artifact@v7
