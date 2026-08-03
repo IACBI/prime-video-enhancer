@@ -101,7 +101,7 @@
 
   const previousControl = window.__primeVideoSpeedControl;
   if (previousControl?.installed) {
-    if (previousControl.version === "3.6.0") {
+    if (previousControl.version === "3.6.1") {
       previousControl.refresh();
       previousControl.applySpeed();
       previousControl.applySubtitleStyles();
@@ -690,7 +690,7 @@
   // Clamped to [1.0vh, 4.2vh] so subtitles are always readable and never block the screen.
   const SUBTITLE_VH_BASE = 1.85;  // vh per 100% setting
   const SUBTITLE_VH_MIN  = 1.0;
-  const SUBTITLE_VH_MAX  = 4.2;
+  const SUBTITLE_VH_MAX  = 7.5;
 
   function computeSubtitleSizeVh() {
     const pct = parseInt(subtitleSize, 10);
@@ -1605,7 +1605,7 @@
 
   const controlApi = {
     installed: true,
-    version: "3.6.0",
+    version: "3.6.1",
     applySpeed,
     refresh,
     applySubtitleStyles,

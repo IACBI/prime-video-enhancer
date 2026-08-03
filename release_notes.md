@@ -1,3 +1,11 @@
+# Prime Video Enhancer v3.6.1 — Uncapped Subtitle Size Scaling Fix
+
+## What's New in v3.6.1
+
+- **Uncapped Subtitle Size Scaling:** Increased `SUBTITLE_VH_MAX` from `4.2vh` to `7.5vh`. Previously, subtitle size percentage inputs above `%230` hit an artificial ceiling and stopped growing. Now, percentage settings scale smoothly and continuously up to `%400`.
+
+---
+
 # 🚀 Prime Video Enhancer v3.6.0 — Mobile Port (Android & iOS) & Security/Performance Optimization
 
 ## What's New in v3.6.0
