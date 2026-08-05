@@ -12,10 +12,19 @@
   const SUBTITLE_BG_KEY = "primeVideoSpeedControl.subtitleBg";
   const ADS_BLOCKED_KEY = "primeVideoSpeedControl.adsBlockedCount";
   const ADS_SAVED_SEC_KEY = "primeVideoSpeedControl.adsTimeSavedSecs";
+  // The .atvwebplayersdk-* classes come from the desktop web player. Prime
+  // Video serves a different player build to mobile UAs, so generic fallbacks
+  // are needed or subtitle styling silently does nothing on a phone. The
+  // geometry filter in findSubtitleTextElements (bottom 55% of the video,
+  // height under 30%) is what keeps the loose matches from grabbing UI chrome.
   const SUBTITLE_TEXT_SELECTOR = [
     ".atvwebplayersdk-subtitle-text",
     ".atvwebplayersdk-captions-text",
-    ".timedText"
+    ".timedText",
+    "[class*='subtitle' i]",
+    "[class*='caption' i]",
+    "[class*='timedtext' i]",
+    "[class*='timed-text' i]"
   ].join(", ");
   
   const MIN_SPEED = 0.25;
@@ -101,7 +110,7 @@
 
   const previousControl = window.__primeVideoSpeedControl;
   if (previousControl?.installed) {
-    if (previousControl.version === "3.6.7") {
+    if (previousControl.version === "3.6.8") {
       previousControl.refresh();
       previousControl.applySpeed();
       previousControl.applySubtitleStyles();
@@ -176,6 +185,22 @@
     } else {
       speedButton.innerHTML = `${formattedSpeed} <span style="color: rgba(255,255,255,0.48); margin-left: 6px; font-size: 12px;">⚡</span>`;
     }
+
+    // The label's width depends on how long the speed reads ("1x" vs "1.25x"),
+    // and the panel is positioned from its left edge. Growing the label without
+    // re-clamping pushes the right-hand end off-screen.
+    reclampPosition();
+  }
+
+  /// Re-applies the current coordinates so clampPosition can measure the panel
+  /// at its present size. Looks the root up by id because this can run before
+  /// the `root` binding is initialised.
+  function reclampPosition() {
+    const el = document.getElementById(ROOT_ID);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    setPosition(rect.left, rect.top, false);
   }
 
   function updateStatsDisplay() {
@@ -638,7 +663,12 @@
     const videoRect = video.getBoundingClientRect();
     if (videoRect.width <= 0 || videoRect.height <= 0) return new Set();
 
-    const minimumSubtitleTop = videoRect.top + videoRect.height * 0.45;
+    // Measured on the mobile player: resting subtitles sit at ~0.83 of the
+    // video height, but Prime lifts them to ~0.33 while the control overlay is
+    // up, which a 0.45 cut-off dropped — styling visibly fell off every time
+    // the controls appeared. The episode title, the one thing in this selector
+    // that must never be restyled, sits at ~0.09, so 0.28 clears both.
+    const minimumSubtitleTop = videoRect.top + videoRect.height * 0.28;
     const maximumSubtitleHeight = videoRect.height * 0.3;
     const elements = new Set();
     const candidateRoots = document.querySelectorAll(SUBTITLE_TEXT_SELECTOR);
@@ -905,6 +935,12 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
+      /* Amazon's page styles do not reach into the panel, so nothing sets this
+         for us. Without it the full-width mobile sheet is 100% + 40px of
+         padding and its right-hand column is clipped off-screen. */
+      #${ROOT_ID}, #${ROOT_ID} * {
+        box-sizing: border-box;
+      }
       #${ROOT_ID} {
         position: fixed;
         top: 76px;
@@ -921,6 +957,15 @@
       #${ROOT_ID}.pvsc-hidden {
         opacity: 0;
         pointer-events: none;
+      }
+      @media (pointer: coarse), (hover: none) {
+        /* On touch there is no hover to bring the control back, and a tap that
+           passes through to the player toggles Prime's own overlay instead. So
+           the idle state stays dimly visible and tappable rather than gone. */
+        #${ROOT_ID}.pvsc-hidden {
+          opacity: 0.32;
+          pointer-events: auto;
+        }
       }
       #${ROOT_ID}.pvsc-no-video {
         display: none;
@@ -942,6 +987,9 @@
         border-radius: 10px;
         box-shadow: none;
         user-select: none;
+        /* Required for pointer-event dragging on touch: without it the browser
+           claims the gesture for panning and fires pointercancel. */
+        touch-action: none;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -965,6 +1013,9 @@
         border-radius: 14px;
         box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
         backdrop-filter: blur(14px);
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
       #${ROOT_ID}.pvsc-menu-open .pvsc-menu {
         display: flex;
@@ -1002,6 +1053,15 @@
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
         backdrop-filter: blur(8px);
         outline: none;
+      }
+      @media (pointer: coarse), (hover: none) {
+        /* Hover is the only thing that made the button look like a button.
+           Touch users need that chrome in the resting state instead. */
+        .pvsc-speed-button {
+          background: rgba(20, 22, 28, 0.72);
+          border-color: rgba(255, 255, 255, 0.22);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        }
       }
       .pvsc-menu button:hover,
       .pvsc-menu button:focus {
@@ -1078,7 +1138,9 @@
         gap: 6px;
         margin-top: 4px;
       }
-      @media (max-width: 768px) {
+      /* Keyed on pointer type, not width: in landscape a phone reports 800px
+         wide, which a max-width breakpoint would wrongly treat as desktop. */
+      @media (pointer: coarse), (hover: none), (max-width: 768px) {
         .pvsc-menu {
           position: fixed !important;
           bottom: 0 !important;
@@ -1092,6 +1154,22 @@
           padding: 16px 20px max(20px, env(safe-area-inset-bottom)) 20px !important;
           box-shadow: 0 -8px 36px rgba(0, 0, 0, 0.75) !important;
           z-index: 2147483647 !important;
+          max-height: 82vh !important;
+          overflow-y: auto !important;
+        }
+        .pvsc-speed-button {
+          min-width: 62px !important;
+          height: 44px !important;
+        }
+        #pvsc-size-input {
+          height: 44px !important;
+          font-size: 15px !important;
+        }
+        .pvsc-section-title {
+          font-size: 12px !important;
+        }
+        .pvsc-stats-row {
+          font-size: 12px !important;
         }
         .pvsc-speed-grid {
           grid-template-columns: repeat(4, 1fr) !important;
@@ -1100,16 +1178,57 @@
           grid-template-columns: repeat(2, 1fr) !important;
         }
         .pvsc-menu button {
-          height: 42px !important;
-          font-size: 14px !important;
+          height: 46px !important;
+          font-size: 15px !important;
         }
         .pvsc-color-swatch {
-          width: 34px !important;
-          height: 34px !important;
+          width: 44px !important;
+          height: 44px !important;
+        }
+      }
+      /* Landscape is where people actually watch, and a full-width sheet there
+         buries the picture behind the controls. Anchoring a narrower panel to
+         one side keeps the video watchable while adjusting it. */
+      @media (pointer: coarse) and (orientation: landscape), (hover: none) and (orientation: landscape) {
+        .pvsc-menu {
+          left: auto !important;
+          width: min(420px, 62vw) !important;
+          max-width: 62vw !important;
+          max-height: 94vh !important;
+          border-radius: 18px 0 0 0 !important;
+          padding: 10px 16px max(10px, env(safe-area-inset-bottom)) 16px !important;
+          gap: 7px !important;
+        }
+        .pvsc-speed-grid {
+          grid-template-columns: repeat(4, 1fr) !important;
+          gap: 5px !important;
+        }
+        .pvsc-menu button {
+          height: 42px !important;
+        }
+        .pvsc-color-swatch {
+          width: 38px !important;
+          height: 38px !important;
+        }
+        #pvsc-size-input {
+          height: 42px !important;
         }
       }
     `;
     document.documentElement.appendChild(style);
+  }
+
+  function clickSkipButtons() {
+    let clicked = 0;
+    for (const button of document.querySelectorAll(AUTO_SKIP_SELECTOR)) {
+      if (isVisible(button)) {
+        try {
+          button.click();
+          clicked += 1;
+        } catch {}
+      }
+    }
+    return clicked;
   }
 
   function makeMenuButton(text, className, onClick) {
@@ -1131,6 +1250,15 @@
     const style = window.getComputedStyle(element);
     return rect.width > 12 && rect.height > 12 && style.visibility !== "hidden" && style.display !== "none";
   }
+
+  const IS_TOUCH = (() => {
+    try {
+      return window.matchMedia("(pointer: coarse)").matches
+        || window.matchMedia("(hover: none)").matches;
+    } catch {
+      return false;
+    }
+  })();
 
   function findCloseButton() {
     const candidates = Array.from(document.querySelectorAll("button, [role='button'], [aria-label], [title]"));
@@ -1220,7 +1348,34 @@
     setPosition(lastKnownMenuPos.left, lastKnownMenuPos.top, false);
   }
 
+  function getFullscreenElement() {
+    return document.fullscreenElement
+      || document.webkitFullscreenElement
+      || document.mozFullScreenElement
+      || document.msFullscreenElement
+      || null;
+  }
+
+  /**
+   * Keeps the panel inside whichever element is currently fullscreen.
+   *
+   * A fullscreen element is promoted to the browser's top layer, which renders
+   * above the whole normal layer tree — `z-index` cannot compete with it. On
+   * Android WebView the fullscreen subtree is handed to the host as a separate
+   * view entirely. Either way a panel left on `documentElement` is invisible
+   * for the whole of fullscreen playback, which on a phone is the only way
+   * anyone watches. So it has to be re-parented into the fullscreen element,
+   * and moved back out when fullscreen ends.
+   */
+  function ensureRootAttached() {
+    const host = getFullscreenElement() || document.documentElement;
+    if (root.parentNode !== host) {
+      host.appendChild(root);
+    }
+  }
+
   function refresh() {
+    ensureRootAttached();
     ensureAdShieldStyle();
     checkAndHandleAds();
 
@@ -1234,11 +1389,19 @@
     root.classList.remove("pvsc-no-video");
     attachVideoListeners(video);
 
-    const closeButton = findCloseButton();
+    // The close-button heuristic assumes a desktop title bar and on a phone it
+    // parks the panel on top of Prime's own control row (volume / close), where
+    // the two fight for the same taps. Touch devices get a fixed safe corner
+    // clear of that row instead; the panel is still draggable from there.
+    const closeButton = IS_TOUCH ? null : findCloseButton();
     if (closeButton) {
       placeNearCloseButton(closeButton);
     } else if (!readSavedPosition()) {
-      if (lastKnownMenuPos) {
+      if (IS_TOUCH) {
+        // 110px down clears Prime's own top control row.
+        const width = root.getBoundingClientRect().width || 62;
+        setPosition(window.innerWidth - width - 12, 110, false);
+      } else if (lastKnownMenuPos) {
         setPosition(lastKnownMenuPos.left, lastKnownMenuPos.top, false);
       } else {
         setPosition(window.innerWidth - 76, 78, false);
@@ -1465,6 +1628,10 @@
   divider2.className = "pvsc-divider";
   menu.appendChild(divider2);
 
+  // Skip-intro / next-episode was keyboard-only ("n"), i.e. unreachable on a
+  // phone. Same action, given a button.
+  menu.appendChild(makeMenuButton("⏭ Skip Intro / Next", "", () => clickSkipButtons()));
+
   const statsRow = document.createElement("div");
   statsRow.className = "pvsc-stats-row";
   statsRow.id = "pvsc-stats-text";
@@ -1522,7 +1689,9 @@
     event.preventDefault();
     event.stopPropagation();
     isDragging = false;
-    speedButton.releasePointerCapture(event.pointerId);
+    try {
+      speedButton.releasePointerCapture(event.pointerId);
+    } catch {}
 
     if (dragStarted) {
       const rect = root.getBoundingClientRect();
@@ -1534,7 +1703,29 @@
     setMenuOpen(!isMenuOpen);
   });
 
+  // Without this, a gesture the browser steals (scroll, multi-touch) leaves
+  // isDragging stuck true, which permanently disables the auto-hide timer.
+  speedButton.addEventListener("pointercancel", (event) => {
+    if (!isDragging) {
+      return;
+    }
+
+    isDragging = false;
+    try {
+      speedButton.releasePointerCapture(event.pointerId);
+    } catch {}
+
+    if (dragStarted) {
+      const rect = root.getBoundingClientRect();
+      setPosition(rect.left, rect.top, true);
+      dragStarted = false;
+    }
+  });
+
   root.addEventListener("click", (event) => event.stopPropagation());
+  // The panel is re-parented into the fullscreen player (see ensureRootAttached),
+  // so without this every menu tap also reaches Prime's tap-to-toggle handler.
+  root.addEventListener("pointerdown", (event) => event.stopPropagation());
   document.addEventListener("pointerdown", (event) => {
     if (!root.contains(event.target)) {
       setMenuOpen(false);
@@ -1578,20 +1769,47 @@
       showControls();
     } else if (key === "n") {
       event.preventDefault();
-      const autoSkipButtons = document.querySelectorAll(AUTO_SKIP_SELECTOR);
-      for (const btn of autoSkipButtons) {
-        if (isVisible(btn)) { try { btn.click(); } catch {} }
-      }
+      clickSkipButtons();
     } else if (event.key === "Escape") {
       setMenuOpen(false);
     }
   }, { capture: true, signal: lifecycleSignal });
 
-  window.addEventListener("resize", () => {
+  /**
+   * Re-clamps the panel into the current viewport after it changes size.
+   *
+   * Never persists: rotation and the on-screen keyboard both fire resize, and
+   * re-saving the squeezed coordinates would let a transient viewport
+   * permanently overwrite the position the user actually chose.
+   */
+  function reflowPosition() {
+    const saved = readSavedPosition();
+    if (saved) {
+      setPosition(saved.left, saved.top, false);
+      return;
+    }
+
+    // While no video is on screen the panel is display:none and measures as a
+    // zero rect at the origin. Repositioning from that would pin it to the
+    // top-left corner for the rest of the session.
     const rect = root.getBoundingClientRect();
-    setPosition(rect.left, rect.top, Boolean(readSavedPosition()));
+    if (rect.width > 0 && rect.height > 0) {
+      setPosition(rect.left, rect.top, false);
+    }
+  }
+
+  window.addEventListener("resize", () => {
+    reflowPosition();
     refresh();
   }, { signal: lifecycleSignal });
+
+  for (const eventName of ["fullscreenchange", "webkitfullscreenchange"]) {
+    document.addEventListener(eventName, () => {
+      ensureRootAttached();
+      reflowPosition();
+      showControls();
+    }, { signal: lifecycleSignal });
+  }
   maintenanceTimer = window.setInterval(() => {
     const video = findVideo();
     applySpeed(video);
@@ -1605,11 +1823,25 @@
 
   const controlApi = {
     installed: true,
-    version: "3.6.7",
+    version: "3.6.8",
     applySpeed,
     refresh,
     applySubtitleStyles,
     checkAndHandleAds,
+    clickSkipButtons,
+    isMenuOpen: () => isMenuOpen,
+    /**
+     * Closes the menu if it is open. Returns whether it actually closed, so the
+     * Android host can let the hardware Back button dismiss the menu first and
+     * only fall through to history navigation when there was nothing to close.
+     */
+    closeMenu() {
+      if (!isMenuOpen) {
+        return false;
+      }
+      setMenuOpen(false);
+      return true;
+    },
     destroy() {
       window.clearInterval(maintenanceTimer);
       window.clearInterval(refreshTimer);

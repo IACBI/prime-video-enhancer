@@ -1,3 +1,19 @@
+# 🚀 Prime Video Enhancer v3.6.8 — Android Playback Fix & Touch-Ready Controls
+
+## What's New in v3.6.8
+
+- **Android playback now works.** The Android WebView was denying `PROTECTED_MEDIA_ID`, the permission Prime Video needs before it can request a Widevine licence, so every title failed with "Video Unavailable". The app now grants it and playback was verified end to end on a physical device.
+- **Script injection made reliable:** the enhancer is registered before page scripts run, and reinstalled across Prime Video's client-side route changes, so the panel is present on player pages.
+- **Hardware Back button:** closes the panel menu first, then navigates back through history, and only exits the app when there is nothing left to go back to.
+- **Built for touch:** finger dragging works, the idle control stays visible and tappable, and every button, colour swatch, and input meets a 44px minimum target.
+- **Layout keyed to pointer type, not screen width:** landscape keeps the mobile layout, the menu no longer runs off the right edge, it scrolls when it does not fit, and it leaves the picture visible in landscape.
+- **Fullscreen:** the panel follows the video into fullscreen instead of vanishing, and Android rotates to landscape on entry.
+- **Skip Intro / Next button** added — the action previously existed only as a keyboard shortcut, so it was unreachable on phones.
+- **Subtitle styling** keeps applying while the player controls are on screen, and now covers players that do not use the desktop caption class names.
+- **Ad and telemetry blocking** matched on hostname, with telemetry answered by an empty response rather than a fake ad document.
+
+---
+
 # 🚀 Prime Video Enhancer v3.6.5 — Official Flutter 3.x Native Project Structure
 
 ## What's New in v3.6.5

@@ -1,7 +1,7 @@
 name: prime_video_enhancer_mobile
 description: "Prime Video Speed & Subtitle Controller Mobile App (Android & iOS)"
 publish_to: 'none'
-version: 3.6.7+1
+version: 3.6.8+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_inappwebview: ^6.0.0
-  shared_preferences: ^2.2.2
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
