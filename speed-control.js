@@ -430,6 +430,10 @@
     subtitleRootChanged();
   }
 
+  function handleVideoResize() {
+    applySubtitleStyles(attachedVideo);
+  }
+
   function detachVideoListeners(video) {
     if (!video) return;
     video.removeEventListener("play", showControls);
@@ -445,6 +449,7 @@
     video.removeEventListener("emptied", handleVideoEmptied);
     video.removeEventListener("waiting", handleAdStall);
     video.removeEventListener("stalled", handleAdStall);
+    video.removeEventListener("resize", handleVideoResize);
     videoSizeObserver?.disconnect();
   }
 
@@ -473,6 +478,9 @@
     attachedVideo.addEventListener("emptied", handleVideoEmptied, { passive: true });
     attachedVideo.addEventListener("waiting", handleAdStall, { passive: true });
     attachedVideo.addEventListener("stalled", handleAdStall, { passive: true });
+    // Fires when the intrinsic dimensions change, which moves the letterboxing
+    // and therefore the picture height the subtitle size is derived from.
+    attachedVideo.addEventListener("resize", handleVideoResize, { passive: true });
 
     observeVideoSize(attachedVideo);
     showControls();
@@ -839,7 +847,29 @@
   }
 
   /**
-   * Converts the user's percentage into a pixel size derived from the video's
+   * Height of the picture itself, which is not the height of the <video> box.
+   *
+   * Prime sizes the element to the player area and letterboxes the frame inside
+   * it. In portrait that box is most of the screen while the picture is a strip
+   * across the middle, so sizing subtitles against the element made them roughly
+   * four times too large and they ran off the edge of the screen. Fitting the
+   * intrinsic aspect ratio into the box gives the number the ratio actually
+   * means.
+   */
+  function pictureHeight(video) {
+    if (!video) return window.innerHeight;
+    const rect = video.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return window.innerHeight;
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
+      const fitted = video.videoHeight * scale;
+      if (fitted > 0) return fitted;
+    }
+    return rect.height;
+  }
+
+  /**
+   * Converts the user's percentage into a pixel size derived from the picture's
    * rendered height, and pushes every subtitle token onto <html>.
    *
    * This is the whole "apply a subtitle setting" path. It is one style write on
@@ -850,8 +880,7 @@
     if (!subtitleEnabled) return;
 
     const pct = parseInt(subtitleSize, 10) || 150;
-    const rect = video ? video.getBoundingClientRect() : null;
-    const basis = rect && rect.height > 0 ? rect.height : window.innerHeight;
+    const basis = pictureHeight(video);
     const sizePx = Math.round(Math.min(
       SUBTITLE_MAX_PX,
       Math.max(SUBTITLE_MIN_PX, basis * SUBTITLE_HEIGHT_RATIO * (pct / 100))
