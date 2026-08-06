@@ -47,10 +47,55 @@ class PrimeVideoWebScreen extends StatefulWidget {
 
 class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   String? _injectedJsCode;
+  String _scriptVersion = '';
   InAppWebViewController? _controller;
   bool _isLoading = true;
   double _loadingProgress = 0;
   bool _isFullscreen = false;
+
+  /// Third-party ad and tracking domains, matched on the registrable suffix.
+  ///
+  /// Kept in step with `AdBlocker.Domains` in the desktop `Program.cs`. The two
+  /// lists had drifted badly — mobile knew about two hosts against the desktop's
+  /// forty — so an Android user was getting a small fraction of the blocking.
+  static const _adDomainSuffixes = [
+    'amazon-adsystem.com',
+    'doubleclick.net',
+    'googlesyndication.com',
+    'googleadservices.com',
+    'google-analytics.com',
+    'googletagmanager.com',
+    'googletagservices.com',
+    'fwmrm.net',
+    'flashtalking.com',
+    'innovid.com',
+    'scorecardresearch.com',
+    'moatads.com',
+    'serving-sys.com',
+    'adsrvr.org',
+    'adnxs.com',
+    'rubiconproject.com',
+    'pubmatic.com',
+    'openx.net',
+    'casalemedia.com',
+    'advertising.com',
+    'tapad.com',
+    'spotxchange.com',
+    'spotx.tv',
+    'springserve.com',
+    'tremorhub.com',
+    'yieldmo.com',
+    'ad-delivery.net',
+    'adtech.de',
+    'smartadserver.com',
+    'imrworldwide.com',
+    'quantserve.com',
+    'quantcount.com',
+  ];
+
+  /// First-party Amazon ad hosts. Prefix-matched because the regional edge
+  /// hosts vary (aan.amazon.com, aan.amazon.co.uk, mads-eu.amazon.com, …).
+  static const _adHostPrefixes = ['aan.amazon.', 'mads.amazon.', 'mads-'];
 
   static const _telemetryHostPrefixes = [
     'unagi',
@@ -58,6 +103,51 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
     'fls-na.',
     'fls-eu.',
     'fls-fe.',
+  ];
+
+  /// Path fragments that identify an ad or telemetry endpoint.
+  ///
+  /// Only applied on the first-party hosts below. A bare path match would also
+  /// hit a third-party video CDN whose segment or licence URLs happen to
+  /// contain something like `/interstitial` or `/csm/`, and failing one of
+  /// those stalls playback outright.
+  static const _adPathFragments = [
+    '/vast/',
+    '/vpaid/',
+    '/vast.xml',
+    '/ad-manifest',
+    '/interstitial',
+    '/aax2/',
+    '/e/dtb/',
+    '/api/ads/',
+  ];
+
+  static const _telemetryPathFragments = [
+    '/telemetry',
+    '/gp/uedata',
+    '/csm/',
+    '/api/2017/suggestions',
+  ];
+
+  static const _firstPartyHostSuffixes = [
+    'amazon.com',
+    'primevideo.com',
+    'media-amazon.com',
+    'a2z.com',
+    'amazon.co.uk',
+    'amazon.de',
+    'amazon.co.jp',
+    'amazon.in',
+    'amazon.com.br',
+    'amazon.com.mx',
+    'amazon.es',
+    'amazon.it',
+    'amazon.fr',
+    'amazon.ca',
+    'amazon.com.au',
+    'amazon.nl',
+    'amazon.se',
+    'amazon.com.tr',
   ];
 
   @override
@@ -81,38 +171,58 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
       debugPrint('[PVSC-Mobile] Error loading speed-control.js asset: $e');
     }
     if (!mounted) return;
+    // Read the version out of the script rather than repeating it here. It is
+    // already duplicated across the csproj, the pubspec and the test suite, and
+    // one more hand-maintained copy is one more thing to drift.
+    final version = js == null
+        ? null
+        : RegExp(r'const VERSION = "([^"]+)"').firstMatch(js)?.group(1);
     // The WebView is not built until this completes, because
     // `initialUserScripts` is only read once, when the platform view is
     // created. Building it earlier would permanently lose the
     // AT_DOCUMENT_START injection.
     setState(() {
       _injectedJsCode = js ?? '';
+      _scriptVersion = version ?? '';
     });
   }
 
+  bool _isFirstParty(String host) =>
+      _firstPartyHostSuffixes.any((suffix) => host == suffix || host.endsWith('.$suffix'));
+
   /// Ad endpoints, which expect a VAST document in reply.
   ///
-  /// Matched on host rather than on the URL as a whole: Prime Video's playback
-  /// and licence traffic goes to atv-ps.amazon.com and the CloudFront CDNs, and
-  /// a substring match risks blocking a path segment those requests share.
-  bool _isAdHost(String host) {
-    return host.endsWith('amazon-adsystem.com') || host.startsWith('aan.amazon.');
+  /// Host is checked before path: Prime Video's playback and licence traffic
+  /// goes to atv-ps.amazon.com and the CloudFront CDNs, so a bare substring
+  /// match over the whole URL risks blocking a path segment those share.
+  bool _isAdRequest(String host, String path) {
+    if (_adDomainSuffixes.any((suffix) => host == suffix || host.endsWith('.$suffix'))) {
+      return true;
+    }
+    if (_adHostPrefixes.any(host.startsWith)) return true;
+    return _isFirstParty(host) && _adPathFragments.any(path.contains);
   }
 
   /// Telemetry endpoints, which expect nothing in particular.
-  bool _isTelemetryHost(String host) {
-    return _telemetryHostPrefixes.any(host.startsWith);
+  bool _isTelemetryRequest(String host, String path) {
+    if (_telemetryHostPrefixes.any(host.startsWith)) return true;
+    return _isFirstParty(host) && _telemetryPathFragments.any(path.contains);
   }
 
-  /// Re-runs the userscript unless it is already live on the current document.
-  /// The script itself is idempotent — it checks `installed` and bails — but
-  /// the guard here avoids shipping 60KB of source across the bridge each time.
+  /// Re-runs the userscript unless the current version is already live on the
+  /// document. The script itself is idempotent — it compares versions and either
+  /// bails or tears the old copy down — but the guard here avoids shipping 90KB
+  /// of source across the bridge on every SPA navigation.
+  ///
+  /// Checks the version, not just `installed`: the desktop host has always done
+  /// so, and matching it means a stale copy left over from a cached document is
+  /// replaced rather than kept forever.
   Future<void> _ensureScriptInstalled(InAppWebViewController controller) async {
     if (_injectedJsCode == null || _injectedJsCode!.isEmpty) return;
     try {
       await controller.evaluateJavascript(
         source:
-            "if (!window.__primeVideoSpeedControl?.installed) { $_injectedJsCode }",
+            "if (window.__primeVideoSpeedControl?.version !== '$_scriptVersion') { $_injectedJsCode }",
       );
     } catch (_) {}
   }
@@ -199,9 +309,25 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                       // PROTECTED_MEDIA_ID the EME layer cannot generate a
                       // licence request and every title fails with
                       // "Video Unavailable".
+                      //
+                      // Only that, though. This used to grant `request.resources`
+                      // wholesale, which meant any page reachable in the WebView
+                      // could take the camera, the microphone or location without
+                      // a prompt — the comment above justified the DRM case, but
+                      // the code never looked at what was being asked for.
                       onPermissionRequest: (controller, request) async {
+                        final granted = request.resources
+                            .where((resource) =>
+                                resource == PermissionResourceType.PROTECTED_MEDIA_ID)
+                            .toList();
+                        if (granted.isEmpty) {
+                          return PermissionResponse(
+                            resources: request.resources,
+                            action: PermissionResponseAction.DENY,
+                          );
+                        }
                         return PermissionResponse(
-                          resources: request.resources,
+                          resources: granted,
                           action: PermissionResponseAction.GRANT,
                         );
                       },
@@ -248,7 +374,8 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                       },
                       shouldInterceptRequest: (controller, request) async {
                         final host = request.url.host.toLowerCase();
-                        if (_isAdHost(host)) {
+                        final path = request.url.path.toLowerCase();
+                        if (_isAdRequest(host, path)) {
                           return WebResourceResponse(
                             contentType: 'application/xml',
                             contentEncoding: 'utf-8',
@@ -259,7 +386,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                             reasonPhrase: 'OK',
                           );
                         }
-                        if (_isTelemetryHost(host)) {
+                        if (_isTelemetryRequest(host, path)) {
                           // An empty 204 rather than the VAST body: a caller
                           // expecting JSON would throw on XML, and a fake
                           // success is harder for Amazon's player to recover
