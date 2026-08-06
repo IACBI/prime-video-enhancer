@@ -13,3 +13,6 @@ Assets/AppIcon.ico
 *.cache
 TestResults/
 dist/
+# Local mobile build output. Release APKs are published as GitHub Release
+# assets, so a 40MB binary never needs to enter the history.
+*.apk
