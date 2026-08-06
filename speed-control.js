@@ -1314,8 +1314,9 @@
         --pvsc-launcher-w: 76px;
         --pvsc-launcher-h: 34px;
         --pvsc-launcher-shift: 0px;
+        --pvsc-launcher-shift-y: 0px;
         --pvsc-swatch: 28px;
-        --pvsc-cols: 1;
+        --pvsc-col-template: minmax(0, 1fr);
         --pvsc-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         --pvsc-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", "Droid Sans Mono", monospace;
 
@@ -1373,7 +1374,7 @@
         /* Required for pointer-event dragging on touch: without it the browser
            claims the gesture for panning and fires pointercancel. */
         touch-action: none;
-        transform: translateX(var(--pvsc-launcher-shift));
+        transform: translate(var(--pvsc-launcher-shift), var(--pvsc-launcher-shift-y));
         transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
                     background 160ms ease, border-color 160ms ease;
       }
@@ -1597,7 +1598,7 @@
       }
       .pvsc-cols {
         display: grid;
-        grid-template-columns: repeat(var(--pvsc-cols), minmax(0, 1fr));
+        grid-template-columns: var(--pvsc-col-template);
         gap: var(--pvsc-gap);
         align-items: start;
       }
@@ -1656,14 +1657,18 @@
       @media (pointer: coarse) and (orientation: landscape),
              (hover: none) and (orientation: landscape),
              (max-width: 768px) and (orientation: landscape) {
+        /* Sized against the real thing: on a 724x332 WebView the panel comes to
+           313px, leaving ~19px of slack. Going a step further (44px controls)
+           measured 325px, which is inside the viewport but too tight to absorb
+           a font or content change. */
         #${ROOT_ID} {
-          --pvsc-ctl: 38px;
+          --pvsc-ctl: 42px;
           --pvsc-gap: 7px;
           --pvsc-pad: 12px;
           --pvsc-body: 13px;
-          --pvsc-swatch: 34px;
+          --pvsc-swatch: 36px;
           --pvsc-panel-w: min(440px, 58vw);
-          --pvsc-cols: 2;
+          --pvsc-col-template: 1.35fr 1fr;
         }
         .pvsc-panel {
           left: auto;
@@ -1990,6 +1995,7 @@
    */
   function updateLauncherShift() {
     root.style.setProperty("--pvsc-launcher-shift", "0px");
+    root.style.setProperty("--pvsc-launcher-shift-y", "0px");
     if (!isMenuOpen) return;
 
     const panelRect = panel.getBoundingClientRect();
@@ -2002,10 +2008,22 @@
       && buttonRect.top < panelRect.bottom;
     if (!overlaps) return;
 
-    // Clamped so shifting clear of the panel can never push it off the left edge.
-    const wanted = panelRect.left - 8 - buttonRect.right;
-    const shift = Math.max(wanted, 8 - buttonRect.left);
-    root.style.setProperty("--pvsc-launcher-shift", `${Math.min(0, Math.round(shift))}px`);
+    // Sideways first: that is the landscape case, where the sheet occupies one
+    // half of the screen and there is room beside it.
+    const wantedX = panelRect.left - 8 - buttonRect.right;
+    if (buttonRect.left + wantedX >= 8) {
+      root.style.setProperty("--pvsc-launcher-shift", `${Math.round(wantedX)}px`);
+      return;
+    }
+
+    // A full-width sheet leaves nowhere to go sideways, so go up instead. This
+    // is reachable in portrait whenever the sheet is tall enough to reach the
+    // launcher — with the on-screen keyboard open, for instance, which costs
+    // the viewport about 300px.
+    const wantedY = panelRect.top - 8 - buttonRect.bottom;
+    if (buttonRect.top + wantedY >= 8) {
+      root.style.setProperty("--pvsc-launcher-shift-y", `${Math.round(wantedY)}px`);
+    }
   }
 
   function showControls() {
@@ -2040,6 +2058,7 @@
       scheduleUiSync();
     } else {
       root.style.setProperty("--pvsc-launcher-shift", "0px");
+      root.style.setProperty("--pvsc-launcher-shift-y", "0px");
       showControls();
     }
   }
