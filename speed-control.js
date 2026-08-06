@@ -1,17 +1,47 @@
 (() => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Prime Video Speed & Subtitle Controller
+  //
+  //  One script, two hosts: a C# console app that drives Edge over CDP, and a
+  //  Flutter/InAppWebView Android app. `mobile/assets/speed-control.js` must
+  //  stay byte-identical to this file.
+  //
+  //  Layers, in order:
+  //    1. Constants          6. Subtitles
+  //    2. Install guard      7. Panel styles
+  //    3. Platform           8. Panel DOM
+  //    4. Settings           9. Scheduler & lifecycle
+  //    5. Playback / ads
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── 1. Constants ───────────────────────────────────────────────────────────
+
+  const VERSION = "3.7.0";
+
   const ROOT_ID = "pvsc-root";
   const STYLE_ID = "pvsc-style";
   const SUBTITLE_STYLE_ID = "pvsc-subtitle-style";
   const AD_SHIELD_STYLE_ID = "pvsc-ad-shield-style";
   const AD_COVER_ID = "pvsc-ad-freeze-canvas";
+
   const STORAGE_KEY = "primeVideoSpeedControl.speed";
   const POSITION_KEY = "primeVideoSpeedControl.position";
   const SUBTITLE_STORAGE_KEY = "primeVideoSpeedControl.subtitleColor";
   const SUBTITLE_ENABLED_KEY = "primeVideoSpeedControl.subtitleEnabled";
   const SUBTITLE_SIZE_KEY = "primeVideoSpeedControl.subtitleSize";
   const SUBTITLE_BG_KEY = "primeVideoSpeedControl.subtitleBg";
+  const PRESERVE_PITCH_KEY = "primeVideoSpeedControl.preservesPitch";
   const ADS_BLOCKED_KEY = "primeVideoSpeedControl.adsBlockedCount";
   const ADS_SAVED_SEC_KEY = "primeVideoSpeedControl.adsTimeSavedSecs";
+
+  // Marks the long-lived container Prime renders subtitles into. The stylesheet
+  // targets its descendants, so a cue inserted later is styled during style
+  // resolution — before its first paint — with no JavaScript in the path.
+  const SUB_ROOT_ATTR = "data-pvsc-sub-root";
+  // Fallback for players that rebuild the container itself on every cue. Stamped
+  // from the MutationObserver callback, which still runs before the next paint.
+  const SUB_CUE_ATTR = "data-pvsc-sub-cue";
+
   // The .atvwebplayersdk-* classes come from the desktop web player. Prime
   // Video serves a different player build to mobile UAs, so generic fallbacks
   // are needed or subtitle styling silently does nothing on a phone. The
@@ -26,7 +56,14 @@
     "[class*='timedtext' i]",
     "[class*='timed-text' i]"
   ].join(", ");
-  
+
+  // Anything in this list disqualifies an element from being treated as a
+  // subtitle container. Without it a full-bleed overlay that happens to hold
+  // both the captions and the episode title would get stamped, and the title
+  // would be restyled along with the dialogue.
+  const SUBTITLE_CHROME_SELECTOR =
+    "button, [role='button'], input, select, textarea, video, img, svg, [class*='title' i]";
+
   const MIN_SPEED = 0.25;
   const MAX_SPEED = 4;
   const STEP = 0.1;
@@ -42,12 +79,22 @@
     { name: "Mavi", hex: "#00FFFF" },
   ];
 
-  // How many consecutive "no ad detected" ticks are required before ad-mode is
-  // exited. A single missed detection (e.g. Prime Video briefly re-rendering the
-  // indicator element during an ad-to-content transition) would otherwise unmute/
-  // un-freeze the video prematurely and immediately re-trigger ad-mode on the next
-  // tick, producing an audible/visible flicker right at ad boundaries.
-  const AD_END_CONFIRM_TICKS = 2;
+  // Subtitle height as a fraction of the *video's* rendered height, at the 100%
+  // setting. Roughly the CEA-708 / BBC guideline. Deliberately not vh: in
+  // landscape on a phone 1vh is ~3.6px, so a vh-based default rendered at ~10px
+  // — and every vh value jumped whenever the host resized the WebView for
+  // fullscreen. Video height tracks the picture, which is what the number means.
+  const SUBTITLE_HEIGHT_RATIO = 0.045;
+  const SUBTITLE_MIN_PX = 12;
+  const SUBTITLE_MAX_PX = 72;
+
+  // How long "no ad detected" must hold before ad-mode is exited. Wall-clock,
+  // not a tick count: the scheduler below changes rate with playback state, and
+  // a tick count would silently mean something different at each rate. A single
+  // missed detection (Prime re-rendering the indicator during an ad-to-content
+  // transition) would otherwise unmute/un-freeze early and immediately
+  // re-trigger ad-mode, producing an audible flicker at ad boundaries.
+  const AD_END_CONFIRM_MS = 400;
 
   // Safety valve: real Amazon Prime Video ad breaks don't run this long. If the
   // shield has been continuously engaged (muted, hyper-speed, video hidden) for longer
@@ -59,11 +106,18 @@
   // After the safety valve force-exits ad mode, suppress re-engaging the visual
   // shield for this long. Without a cooldown, a persistently-matching element
   // (a stuck indicator, or UI we misclassify) re-engages ad mode on the very
-  // next 200ms tick after the valve fires, turning one false positive into an
+  // next tick after the valve fires, turning one false positive into an
   // endless loop of black-screen/hyper-speed windows. Skip-button clicking and the
   // network-level blocker stay active during the cooldown, so real ads are
   // still handled — only the mute/hide/hyper-speed shield is suppressed.
   const AD_COOLDOWN_AFTER_VALVE_MS = 120000;
+
+  // Scheduler cadence. Idle playback only needs to notice an ad *starting*, and
+  // the MutationObserver already covers that within a frame; the timer is a
+  // safety net. Inside an ad the latency is multiplied by the ad speed, so a
+  // second of lag would skip half a minute of episode — hence the fast rate.
+  const TICK_IDLE_MS = 1000;
+  const TICK_AD_MS = 100;
 
   const AUTO_SKIP_SELECTOR = [
     ".atvwebplayersdk-skip-button",
@@ -108,9 +162,11 @@
     ".ad-break-container"
   ].join(", ");
 
+  // ── 2. Install guard ───────────────────────────────────────────────────────
+
   const previousControl = window.__primeVideoSpeedControl;
   if (previousControl?.installed) {
-    if (previousControl.version === "3.6.8") {
+    if (previousControl.version === VERSION) {
       previousControl.refresh();
       previousControl.applySpeed();
       previousControl.applySubtitleStyles();
@@ -120,23 +176,97 @@
     previousControl.destroy?.();
   }
 
-  let speed = Number(window.localStorage.getItem(STORAGE_KEY));
+  // ── 3. Platform ────────────────────────────────────────────────────────────
+
+  // Kept in lockstep with the CSS breakpoints below. They used to disagree —
+  // the CSS included a width clause and the JS did not — so a narrow desktop
+  // window got the touch layout with desktop positioning logic driving it.
+  const TOUCH_QUERY = "(pointer: coarse), (hover: none), (max-width: 768px)";
+  const LANDSCAPE_QUERY = "(orientation: landscape)";
+
+  function matchQuery(query) {
+    try {
+      return window.matchMedia(query).matches;
+    } catch {
+      return false;
+    }
+  }
+
+  // Only the touch/desktop split needs to be tracked in JS — it decides default
+  // placement. Orientation is watched too, but purely so a rotation re-runs the
+  // reflow; the layout itself is the stylesheet's business.
+  let isTouch = matchQuery(TOUCH_QUERY);
+
+  const lifecycleController = new AbortController();
+  const lifecycleSignal = lifecycleController.signal;
+
+  // ── 4. Settings ────────────────────────────────────────────────────────────
+
+  /**
+   * Reads a setting, tolerating storage being unavailable.
+   *
+   * Touching localStorage throws outright on a document with an opaque origin,
+   * and when the user or the embedder has blocked site data. These reads happen
+   * at install time, so an unguarded one takes the whole script down with it and
+   * the panel simply never appears.
+   */
+  function readStored(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  let speed = Number(readStored(STORAGE_KEY));
   if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) {
     speed = DEFAULT_SPEED;
   }
 
-  let subtitleColor = window.localStorage.getItem(SUBTITLE_STORAGE_KEY) || DEFAULT_SUBTITLE_COLOR;
+  let subtitleColor = readStored(SUBTITLE_STORAGE_KEY) || DEFAULT_SUBTITLE_COLOR;
   if (!/^#[0-9A-Fa-f]{6}$/.test(subtitleColor)) {
     subtitleColor = DEFAULT_SUBTITLE_COLOR;
   }
 
-  let subtitleEnabled = window.localStorage.getItem(SUBTITLE_ENABLED_KEY) !== "false";
-  let subtitleSize = window.localStorage.getItem(SUBTITLE_SIZE_KEY) || "150%";
-  let subtitleBg = window.localStorage.getItem(SUBTITLE_BG_KEY) || "shadow"; // transparent, shadow, solid
-  
-  let adsBlockedCount = parseInt(window.localStorage.getItem(ADS_BLOCKED_KEY) || "0", 10);
-  let adsTimeSavedSecs = parseInt(window.localStorage.getItem(ADS_SAVED_SEC_KEY) || "0", 10);
+  let subtitleEnabled = readStored(SUBTITLE_ENABLED_KEY) !== "false";
+  let subtitleSize = readStored(SUBTITLE_SIZE_KEY) || "150%";
+  let subtitleBg = readStored(SUBTITLE_BG_KEY) || "shadow"; // transparent, shadow, solid
+  let preservePitch = readStored(PRESERVE_PITCH_KEY) !== "false";
 
+  let adsBlockedCount = parseInt(readStored(ADS_BLOCKED_KEY) || "0", 10);
+  let adsTimeSavedSecs = parseInt(readStored(ADS_SAVED_SEC_KEY) || "0", 10);
+
+  /**
+   * Batches localStorage writes.
+   *
+   * setItem is synchronous and hits disk. Doing it inside a click handler, on
+   * the same task as the playbackRate write, is a measurable stall on a low-end
+   * phone — and holding "+" produces a burst of them. These are preferences, so
+   * losing the last 300ms to a crash costs nothing.
+   */
+  const pendingWrites = new Map();
+  let persistTimer = 0;
+
+  function persist(key, value) {
+    pendingWrites.set(key, value);
+    if (persistTimer) return;
+    persistTimer = window.setTimeout(flushPersist, 300);
+  }
+
+  function flushPersist() {
+    window.clearTimeout(persistTimer);
+    persistTimer = 0;
+    for (const [key, value] of pendingWrites) {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {}
+    }
+    pendingWrites.clear();
+  }
+
+  // ── 5. Playback / ads ──────────────────────────────────────────────────────
+
+  let attachedVideo = null;
   let hideTimer = 0;
   let isMenuOpen = false;
   let isDragging = false;
@@ -146,28 +276,29 @@
   let lastPointerX = 0;
   let lastPointerY = 0;
 
-  let currentObservedContainer = null;
-  let subtitleObserver = null;
-  let attachedVideo = null;
-  let mutationThrottleTimer = 0;
-  let maintenanceTimer = 0;
-  let refreshTimer = 0;
-  const lifecycleController = new AbortController();
-  const lifecycleSignal = lifecycleController.signal;
-  const styledSubtitleElements = new Map();
-
   const TARGET_AD_SPEED = 30;
   const FALLBACK_AD_SPEED = 16;
   let currentAdSpeed = TARGET_AD_SPEED;
 
   let isAdCurrentlyActive = false;
   let wasMutedBeforeAd = false;
-  let noAdStreak = 0;
+  let firstNoAdAt = 0;
   let adModeStartedAt = 0;
   let adCooldownUntil = 0;
   let adHiddenVideo = null;
   const handledAutoSkipButtons = new WeakSet();
   const handledAdSkipButtons = new WeakSet();
+
+  // Guards against an unbounded rate-write fight with Amazon's own player SDK.
+  // If the SDK insists on resetting the rate, re-asserting from `ratechange`
+  // turns into a ping-pong at event rate — and every single toggle makes
+  // Chromium resize the audio renderer's buffer, which is the pause the user
+  // sees. Above the threshold we stop reacting to the event and let the slow
+  // safety tick carry it instead.
+  const MAX_REASSERTS_PER_SEC = 3;
+  let reassertWindowStart = 0;
+  let reassertCount = 0;
+  let reassertSuspended = false;
 
   function clamp(value) {
     return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
@@ -177,48 +308,18 @@
     return `${value.toFixed(2).replace(/\.?0+$/, "")}x`;
   }
 
-  function updateButtonDisplay() {
-    if (!speedButton) return;
-    const formattedSpeed = format(speed);
-    if (subtitleEnabled) {
-      speedButton.innerHTML = `${formattedSpeed} <span style="color: ${subtitleColor}; margin-left: 6px; font-size: 13px; text-shadow: 0 0 5px rgba(0,0,0,0.85);">●</span>`;
-    } else {
-      speedButton.innerHTML = `${formattedSpeed} <span style="color: rgba(255,255,255,0.48); margin-left: 6px; font-size: 12px;">⚡</span>`;
-    }
-
-    // The label's width depends on how long the speed reads ("1x" vs "1.25x"),
-    // and the panel is positioned from its left edge. Growing the label without
-    // re-clamping pushes the right-hand end off-screen.
-    reclampPosition();
-  }
-
-  /// Re-applies the current coordinates so clampPosition can measure the panel
-  /// at its present size. Looks the root up by id because this can run before
-  /// the `root` binding is initialised.
-  function reclampPosition() {
-    const el = document.getElementById(ROOT_ID);
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    setPosition(rect.left, rect.top, false);
-  }
-
-  function updateStatsDisplay() {
-    const statsEl = document.getElementById("pvsc-stats-text");
-    if (statsEl) {
-      statsEl.textContent = `🛡️ ${adsBlockedCount} ads blocked (~${Math.floor(adsTimeSavedSecs / 60)}m saved)`;
-    }
-  }
-
-  function incrementAdStats(count, secs) {
-    adsBlockedCount += count;
-    adsTimeSavedSecs += secs;
-    window.localStorage.setItem(ADS_BLOCKED_KEY, String(adsBlockedCount));
-    window.localStorage.setItem(ADS_SAVED_SEC_KEY, String(adsTimeSavedSecs));
-    updateStatsDisplay();
+  function formatStop(value) {
+    return value.toFixed(2).replace(/\.?0+$/, "");
   }
 
   function findVideo() {
+    // Stay with the element we already own. Re-electing on every tick made two
+    // consecutive ticks resolve to different <video> elements around ad/content
+    // transitions, and the rate then landed on whichever won that tick.
+    if (attachedVideo && attachedVideo.isConnected) {
+      return attachedVideo;
+    }
+
     const videos = Array.from(document.querySelectorAll("video"));
     return (
       videos.find((video) => video.readyState > 0) ||
@@ -228,24 +329,105 @@
     );
   }
 
+  /**
+   * The single place playback rate is written.
+   *
+   * preservesPitch first: it selects which resampling path the audio renderer
+   * uses, and changing it *after* the rate makes the renderer reconfigure a
+   * second time, at the new rate.
+   */
+  function writeRate(video, rate) {
+    if (!video) return;
+
+    // Pitch correction is a time-stretcher running on the audio thread. At the
+    // ad shield's 30x it cannot keep up on a low-end phone and stalls the whole
+    // pipeline — and the video is muted during ad mode anyway, so there is
+    // nothing to preserve.
+    const pitch = isAdCurrentlyActive ? false : preservePitch;
+    if ("preservesPitch" in video && video.preservesPitch !== pitch) {
+      video.preservesPitch = pitch;
+    }
+
+    if (video.playbackRate !== rate) video.playbackRate = rate;
+  }
+
+  /**
+   * Brings defaultPlaybackRate in line, away from the interaction path.
+   *
+   * It is worth setting — it is the value playbackRate returns to when the
+   * player resets, so without it the speed can silently revert on a seek — but
+   * it does not touch the audio renderer, and it still fires `ratechange`.
+   * Writing it next to the rate therefore doubled the events Amazon's player
+   * SDK sees for one tap while buying nothing. It rides the background tick
+   * instead: one event on the path the user can feel, not two.
+   */
+  function alignDefaultRate(video, rate) {
+    if (video && video.defaultPlaybackRate !== rate) {
+      video.defaultPlaybackRate = rate;
+    }
+  }
+
+  function targetRate() {
+    return isAdCurrentlyActive ? currentAdSpeed : speed;
+  }
+
+  /** True while the pipeline is in a state where writing the rate would extend a rebuffer. */
+  function isRateWriteUnsafe(video) {
+    return !video || video.seeking || video.readyState < 3;
+  }
+
+  function applySpeed(video = findVideo()) {
+    if (!video) return;
+    attachVideoListeners(video);
+    if (isAdCurrentlyActive && video.muted !== true) video.muted = true;
+    writeRate(video, targetRate());
+  }
+
+  function handleRateDrift() {
+    const video = attachedVideo;
+    if (!video || isRateWriteUnsafe(video)) return;
+    if (video.playbackRate === targetRate()) return;
+
+    const now = Date.now();
+    if (now - reassertWindowStart > 1000) {
+      reassertWindowStart = now;
+      reassertCount = 0;
+      reassertSuspended = false;
+    }
+
+    reassertCount += 1;
+    if (reassertCount > MAX_REASSERTS_PER_SEC) {
+      if (!reassertSuspended) {
+        reassertSuspended = true;
+        console.warn("[pvsc] Playback rate is being reset faster than it can be re-applied; backing off to the safety tick.");
+      }
+      return;
+    }
+
+    writeRate(video, targetRate());
+  }
+
+  function handleVideoReady() {
+    reassertSuspended = false;
+    reassertCount = 0;
+    const video = attachedVideo;
+    if (video && !isRateWriteUnsafe(video)) {
+      alignDefaultRate(video, targetRate());
+      writeRate(video, targetRate());
+    }
+  }
+
   function handleAdStall() {
     if (isAdCurrentlyActive && currentAdSpeed > FALLBACK_AD_SPEED) {
       console.warn("[pvsc] Ad playback stalled at 30x, falling back to 16x");
       currentAdSpeed = FALLBACK_AD_SPEED;
-      handleVideoPlaybackState();
+      applySpeed();
     }
   }
 
-  function handleVideoPlaybackState() {
-    if (!attachedVideo) return;
-    if (isAdCurrentlyActive) {
-      if (attachedVideo.playbackRate !== currentAdSpeed) attachedVideo.playbackRate = currentAdSpeed;
-      if (attachedVideo.defaultPlaybackRate !== currentAdSpeed) attachedVideo.defaultPlaybackRate = currentAdSpeed;
-      if (attachedVideo.muted !== true) attachedVideo.muted = true;
-    } else {
-      if (attachedVideo.playbackRate !== speed) attachedVideo.playbackRate = speed;
-      if (attachedVideo.defaultPlaybackRate !== speed) attachedVideo.defaultPlaybackRate = speed;
-    }
+  function handleVideoEmptied() {
+    attachedVideo = null;
+    subtitleRootChanged();
   }
 
   function detachVideoListeners(video) {
@@ -254,12 +436,16 @@
     video.removeEventListener("playing", showControls);
     video.removeEventListener("pause", showControls);
     video.removeEventListener("seeked", showControls);
-    video.removeEventListener("ratechange", handleVideoPlaybackState);
-    video.removeEventListener("play", handleVideoPlaybackState);
-    video.removeEventListener("playing", handleVideoPlaybackState);
-    video.removeEventListener("timeupdate", handleVideoPlaybackState);
+    video.removeEventListener("ratechange", handleRateDrift);
+    video.removeEventListener("loadedmetadata", handleVideoReady);
+    video.removeEventListener("loadeddata", handleVideoReady);
+    video.removeEventListener("canplay", handleVideoReady);
+    video.removeEventListener("play", handleVideoReady);
+    video.removeEventListener("seeked", handleVideoReady);
+    video.removeEventListener("emptied", handleVideoEmptied);
     video.removeEventListener("waiting", handleAdStall);
     video.removeEventListener("stalled", handleAdStall);
+    videoSizeObserver?.disconnect();
   }
 
   function attachVideoListeners(video) {
@@ -274,35 +460,36 @@
     attachedVideo.addEventListener("playing", showControls, { passive: true });
     attachedVideo.addEventListener("pause", showControls, { passive: true });
     attachedVideo.addEventListener("seeked", showControls, { passive: true });
-    attachedVideo.addEventListener("ratechange", handleVideoPlaybackState, { passive: true });
-    attachedVideo.addEventListener("play", handleVideoPlaybackState, { passive: true });
-    attachedVideo.addEventListener("playing", handleVideoPlaybackState, { passive: true });
-    attachedVideo.addEventListener("timeupdate", handleVideoPlaybackState, { passive: true });
+    // Deliberately NOT bound to timeupdate. It fires ~4x/s on the media hot
+    // path, and each re-assert it triggered was another chance to collide with
+    // the player SDK. The events below cover every point the rate can actually
+    // be lost, and the safety tick covers the rest.
+    attachedVideo.addEventListener("ratechange", handleRateDrift, { passive: true });
+    attachedVideo.addEventListener("loadedmetadata", handleVideoReady, { passive: true });
+    attachedVideo.addEventListener("loadeddata", handleVideoReady, { passive: true });
+    attachedVideo.addEventListener("canplay", handleVideoReady, { passive: true });
+    attachedVideo.addEventListener("play", handleVideoReady, { passive: true });
+    attachedVideo.addEventListener("seeked", handleVideoReady, { passive: true });
+    attachedVideo.addEventListener("emptied", handleVideoEmptied, { passive: true });
     attachedVideo.addEventListener("waiting", handleAdStall, { passive: true });
     attachedVideo.addEventListener("stalled", handleAdStall, { passive: true });
+
+    observeVideoSize(attachedVideo);
     showControls();
   }
 
-  function applySpeed(video = findVideo()) {
-    if (!video) {
-      return;
+  function updateStatsDisplay() {
+    if (statsRow) {
+      statsRow.textContent = `${adsBlockedCount} ads blocked · ${Math.floor(adsTimeSavedSecs / 60)}m saved`;
     }
-    attachVideoListeners(video);
+  }
 
-    if (isAdCurrentlyActive) {
-      if (video.playbackRate !== currentAdSpeed) video.playbackRate = currentAdSpeed;
-      if (video.defaultPlaybackRate !== currentAdSpeed) video.defaultPlaybackRate = currentAdSpeed;
-      if (video.muted !== true) video.muted = true;
-      return;
-    }
-
-    if (video.playbackRate !== speed) {
-      video.playbackRate = speed;
-    }
-
-    if (video.defaultPlaybackRate !== speed) {
-      video.defaultPlaybackRate = speed;
-    }
+  function incrementAdStats(count, secs) {
+    adsBlockedCount += count;
+    adsTimeSavedSecs += secs;
+    persist(ADS_BLOCKED_KEY, String(adsBlockedCount));
+    persist(ADS_SAVED_SEC_KEY, String(adsTimeSavedSecs));
+    updateStatsDisplay();
   }
 
   function ensureAdShieldStyle() {
@@ -479,14 +666,14 @@
     }
     isAdCurrentlyActive = false;
     currentAdSpeed = TARGET_AD_SPEED;
-    noAdStreak = 0;
+    firstNoAdAt = 0;
     adModeStartedAt = 0;
     video.muted = wasMutedBeforeAd;
     restoreHiddenVideos();
     removeAdCover();
-    video.playbackRate = speed;
-    video.defaultPlaybackRate = speed;
-    applySpeed();
+    alignDefaultRate(video, speed);
+    writeRate(video, speed);
+    setTickRate(TICK_IDLE_MS);
   }
 
   function checkAndHandleAds(video = findVideo()) {
@@ -527,7 +714,7 @@
     }
 
     if (adDetected) {
-      noAdStreak = 0;
+      firstNoAdAt = 0;
     }
 
     if (adDetected && !isAdCurrentlyActive && Date.now() >= adCooldownUntil) {
@@ -538,8 +725,8 @@
       showAdCover(video);
       video.muted = true;
       hideVideoForAd(video);
-      if (video.playbackRate !== currentAdSpeed) video.playbackRate = currentAdSpeed;
-      if (video.defaultPlaybackRate !== currentAdSpeed) video.defaultPlaybackRate = currentAdSpeed;
+      writeRate(video, currentAdSpeed);
+      setTickRate(TICK_AD_MS);
       if (video.paused) {
         try { video.play(); } catch {}
       }
@@ -553,8 +740,7 @@
     }
 
     if (isAdCurrentlyActive && adDetected) {
-      if (video.playbackRate !== currentAdSpeed) video.playbackRate = currentAdSpeed;
-      if (video.defaultPlaybackRate !== currentAdSpeed) video.defaultPlaybackRate = currentAdSpeed;
+      writeRate(video, currentAdSpeed);
       if (video.muted !== true) video.muted = true;
       if (video !== adHiddenVideo || video.style.opacity !== "0") hideVideoForAd(video);
       showAdCover(video);
@@ -562,15 +748,35 @@
         try { video.play(); } catch {}
       }
     } else if (isAdCurrentlyActive && !adDetected) {
-      // Require a couple of consecutive negative ticks before declaring the ad
-      // over, to avoid flicker if an indicator element briefly disappears during
+      // Require the negative to hold for a while before declaring the ad over,
+      // to avoid flicker if an indicator element briefly disappears during
       // Prime Video's own re-render at the ad/content boundary.
-      noAdStreak += 1;
-      if (noAdStreak >= AD_END_CONFIRM_TICKS) {
+      if (!firstNoAdAt) {
+        firstNoAdAt = Date.now();
+      } else if (Date.now() - firstNoAdAt >= AD_END_CONFIRM_MS) {
         exitAdMode(video);
       }
     }
   }
+
+  // ── 6. Subtitles ───────────────────────────────────────────────────────────
+
+  // Everything visual lives in the stylesheet below and is parameterised by
+  // custom properties. Two consequences, both of them the point:
+  //
+  //   * A cue element inserted by Prime matches the rule during style
+  //     resolution, i.e. before its first paint. The previous design wrote
+  //     inline styles from JavaScript *after* the element existed, which is
+  //     structurally one frame too late — that frame is the white flash.
+  //   * Changing a setting is one setProperty on <html>. No DOM walk, no
+  //     per-element writes, nothing for the video to hitch on.
+  let subtitleRoot = null;
+  let subtitleCandidate = null;
+  let candidateText = "";
+  let candidateTurnovers = 0;
+  let discoveryTimer = 0;
+  let discoveryMisses = 0;
+  let videoSizeObserver = null;
 
   function ensureSubtitleStyle() {
     let style = document.getElementById(SUBTITLE_STYLE_ID);
@@ -584,80 +790,112 @@
       style.textContent = "";
       return;
     }
-    
-    let bgCss = "";
-    if (subtitleBg === "transparent") {
-      bgCss = "background-color: transparent !important;";
-    } else if (subtitleBg === "solid") {
-      bgCss = "background-color: rgba(0, 0, 0, 0.9) !important;";
-    } else {
-      // shadow (default)
-      bgCss = "background-color: rgba(0, 0, 0, 0.45) !important;";
-    }
 
-    // Use vh-based size for ::cue so it doesn't compound with Amazon's own
-    // container font-size scaling.  Shadow offsets scale proportionally.
-    const cueSizeVh = computeSubtitleSizeVh();
-    const cueShadow = computeScaledShadow();
-
+    // The var() fallbacks are load-bearing, not defensive noise: a custom
+    // property that is unset or invalid makes the declaration invalid at
+    // computed-value time, and the property then falls back to `inherit`
+    // rather than to the previous cascade winner — i.e. silently to Amazon's
+    // white. Never remove them.
     style.textContent = `
-      video::cue {
-        color: ${subtitleColor} !important;
-        font-size: ${cueSizeVh} !important;
+      [${SUB_ROOT_ATTR}] :is(span, p, div):not(#${ROOT_ID} *),
+      [${SUB_CUE_ATTR}], [${SUB_CUE_ATTR}] :is(span, p, div),
+      .atvwebplayersdk-subtitle-text, .atvwebplayersdk-subtitle-text :is(span, p, div),
+      .atvwebplayersdk-captions-text, .atvwebplayersdk-captions-text :is(span, p, div) {
+        color: var(--pvsc-sub-color, ${DEFAULT_SUBTITLE_COLOR}) !important;
+        font-size: var(--pvsc-sub-size, 24px) !important;
         font-weight: 700 !important;
         line-height: 1.35 !important;
-        ${bgCss}
-        text-shadow: ${cueShadow} !important;
+        text-shadow: var(--pvsc-sub-shadow, none) !important;
+        background-color: var(--pvsc-sub-bg, transparent) !important;
+        padding: var(--pvsc-sub-pad, 0) !important;
+        border-radius: var(--pvsc-sub-radius, 0) !important;
+        -webkit-box-decoration-break: clone !important;
+        box-decoration-break: clone !important;
+        -webkit-text-size-adjust: 100% !important;
+      }
+      /* The background is a box property, so on nested spans it would paint
+         twice and the padding would compound. Only the innermost element that
+         actually holds text keeps the box; wrappers go transparent. */
+      [${SUB_ROOT_ATTR}] :is(span, p, div):has(:is(span, p, div)),
+      [${SUB_CUE_ATTR}]:has(:is(span, p, div)),
+      [${SUB_CUE_ATTR}] :is(span, p, div):has(:is(span, p, div)),
+      .atvwebplayersdk-subtitle-text:has(:is(span, p, div)),
+      .atvwebplayersdk-captions-text:has(:is(span, p, div)) {
+        background-color: transparent !important;
+        padding: 0 !important;
+        border-radius: 0 !important;
+        text-shadow: none !important;
+      }
+      /* Kept for any build that renders captions as native TextTracks rather
+         than DOM elements. Not the primary path — Prime does not use it. */
+      video::cue {
+        color: var(--pvsc-sub-color, ${DEFAULT_SUBTITLE_COLOR}) !important;
+        font-size: var(--pvsc-sub-size, 24px) !important;
+        font-weight: 700 !important;
+        background-color: var(--pvsc-sub-bg, transparent) !important;
+        text-shadow: var(--pvsc-sub-shadow, none) !important;
       }
     `;
   }
 
-  const SUBTITLE_STYLE_PROPERTIES = [
-    "color",
-    "font-size",
-    "font-weight",
-    "line-height",
-    "background-color",
-    "text-shadow",
-    "padding",
-    "border-radius",
-    "-webkit-box-decoration-break",
-    "box-decoration-break"
-  ];
+  /**
+   * Converts the user's percentage into a pixel size derived from the video's
+   * rendered height, and pushes every subtitle token onto <html>.
+   *
+   * This is the whole "apply a subtitle setting" path. It is one style write on
+   * a single element.
+   */
+  function applySubtitleStyles(video = findVideo()) {
+    ensureSubtitleStyle();
+    if (!subtitleEnabled) return;
 
-  function rememberSubtitleStyles(element) {
-    if (styledSubtitleElements.has(element)) return;
-    const originalStyles = new Map();
-    for (const property of SUBTITLE_STYLE_PROPERTIES) {
-      originalStyles.set(property, {
-        value: element.style.getPropertyValue(property),
-        priority: element.style.getPropertyPriority(property)
-      });
+    const pct = parseInt(subtitleSize, 10) || 150;
+    const rect = video ? video.getBoundingClientRect() : null;
+    const basis = rect && rect.height > 0 ? rect.height : window.innerHeight;
+    const sizePx = Math.round(Math.min(
+      SUBTITLE_MAX_PX,
+      Math.max(SUBTITLE_MIN_PX, basis * SUBTITLE_HEIGHT_RATIO * (pct / 100))
+    ));
+
+    const scale = Math.max(0.5, pct / 100);
+    let bg;
+    let shadow;
+    let pad;
+    let radius;
+    if (subtitleBg === "solid") {
+      bg = "rgba(0, 0, 0, 0.92)";
+      shadow = `0 ${(1.5 * scale).toFixed(1)}px ${(3 * scale).toFixed(1)}px rgba(0, 0, 0, 0.8)`;
+      pad = "0.12em 0.35em";
+      radius = "4px";
+    } else if (subtitleBg === "transparent") {
+      bg = "transparent";
+      // Without a plate behind it the text needs its own outline to stay
+      // readable over bright frames.
+      shadow = `-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 ${(2.5 * scale).toFixed(1)}px ${(4 * scale).toFixed(1)}px rgba(0,0,0,0.9)`;
+      pad = "0";
+      radius = "0";
+    } else {
+      bg = "rgba(0, 0, 0, 0.48)";
+      shadow = `0 ${(1.5 * scale).toFixed(1)}px ${(3 * scale).toFixed(1)}px rgba(0, 0, 0, 0.8)`;
+      pad = "0.12em 0.35em";
+      radius = "4px";
     }
-    styledSubtitleElements.set(element, originalStyles);
+
+    const style = document.documentElement.style;
+    style.setProperty("--pvsc-sub-color", subtitleColor);
+    style.setProperty("--pvsc-sub-size", `${sizePx}px`);
+    style.setProperty("--pvsc-sub-bg", bg);
+    style.setProperty("--pvsc-sub-shadow", shadow);
+    style.setProperty("--pvsc-sub-pad", pad);
+    style.setProperty("--pvsc-sub-radius", radius);
   }
 
-  function restoreSubtitleElement(element) {
-    const originalStyles = styledSubtitleElements.get(element);
-    if (!originalStyles) return;
-    for (const [property, original] of originalStyles) {
-      if (original.value) {
-        element.style.setProperty(property, original.value, original.priority);
-      } else {
-        element.style.removeProperty(property);
-      }
-    }
-    styledSubtitleElements.delete(element);
-  }
-
-  function restoreInactiveSubtitleElements(activeElements = new Set()) {
-    for (const element of [...styledSubtitleElements.keys()]) {
-      if (!element.isConnected || !activeElements.has(element)) {
-        restoreSubtitleElement(element);
-      }
-    }
-  }
-
+  /**
+   * Finds the elements currently holding subtitle text.
+   *
+   * Only used to *discover* the container now — not to style anything. It runs
+   * on cue turnover rather than on a timer.
+   */
   function findSubtitleTextElements(video) {
     if (!video) return new Set();
     const videoRect = video.getBoundingClientRect();
@@ -702,106 +940,227 @@
     return elements;
   }
 
-  function clearLegacySubtitleOverrides() {
-    const candidateRoots = document.querySelectorAll(SUBTITLE_TEXT_SELECTOR);
-    for (const rootEl of candidateRoots) {
-      if (!(rootEl instanceof HTMLElement) || root.contains(rootEl)) continue;
-      // Strip background-color on parent container when it has styled text children,
-      // preventing nested/double background artifacts.
-      if (rootEl.firstElementChild) {
-        rootEl.style.setProperty("background-color", "transparent", "important");
+  function lowestCommonAncestor(elements) {
+    let ancestor = elements[0];
+    for (let i = 1; i < elements.length && ancestor; i += 1) {
+      while (ancestor && !ancestor.contains(elements[i])) {
+        ancestor = ancestor.parentElement;
       }
     }
+    return ancestor;
   }
 
-  // Converts the user's percentage setting into a vh-based CSS value.
-  // Baseline: 100% setting = 1.85vh ≈ 20px on a 1080p screen.
-  // 150% = 2.78vh ≈ 30px, 200% = 3.70vh ≈ 40px.
-  // Clamped to [1.0vh, 4.2vh] so subtitles are always readable and never block the screen.
-  const SUBTITLE_VH_BASE = 1.85;  // vh per 100% setting
-  const SUBTITLE_VH_MIN  = 1.0;
-  const SUBTITLE_VH_MAX  = 7.5;
+  /**
+   * Whether an element is safe to hand the subtitle stylesheet.
+   *
+   * The band check is what keeps the walk from reaching a full-bleed player
+   * overlay: such an element starts at the top of the video, so it fails the
+   * 0.28 floor before the episode title inside it is ever a concern. The chrome
+   * check covers the layout where captions share a bottom bar with controls.
+   */
+  function isSubtitleContainer(el, videoRect) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el === document.body || el === document.documentElement) return false;
+    // ensureRootAttached() moves our own panel into the fullscreen subtree,
+    // which can make it a sibling — or a descendant — of the captions wrapper.
+    // Stamping an ancestor of the panel would restyle the panel's own text.
+    if (root.contains(el) || el.contains(root)) return false;
 
-  function computeSubtitleSizeVh() {
-    const pct = parseInt(subtitleSize, 10);
-    if (!Number.isFinite(pct) || pct <= 0) return SUBTITLE_VH_BASE + "vh";
-    const raw = (SUBTITLE_VH_BASE * pct) / 100;
-    const clamped = Math.min(SUBTITLE_VH_MAX, Math.max(SUBTITLE_VH_MIN, raw));
-    return clamped.toFixed(2) + "vh";
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.height > videoRect.height * 0.45) return false;
+    if (rect.top < videoRect.top + videoRect.height * 0.28) return false;
+    if (rect.bottom > videoRect.bottom + 4) return false;
+
+    return el.querySelector(SUBTITLE_CHROME_SELECTOR) === null
+      && el.querySelector(AD_INDICATOR_SELECTOR) === null
+      && el.querySelector(AUTO_SKIP_SELECTOR) === null;
   }
 
-  // Returns a text-shadow CSS value whose offsets/blur scale proportionally
-  // with the computed font-size so the shadow looks clean and sharp at any scale.
-  function computeScaledShadow() {
-    const pct = parseInt(subtitleSize, 10) || 100;
-    const scale = Math.max(0.5, pct / 100);
-    if (subtitleBg === "transparent") {
-      const y = (2.5 * scale).toFixed(1);
-      const blur = (4 * scale).toFixed(1);
-      return `-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 ${y}px ${blur}px rgba(0,0,0,0.9)`;
-    }
-    const y = (1.5 * scale).toFixed(1);
-    const blur = (3 * scale).toFixed(1);
-    return `0 ${y}px ${blur}px rgba(0, 0, 0, 0.8)`;
+  function stampSubtitleRoot(el) {
+    if (subtitleRoot === el) return;
+    if (subtitleRoot) subtitleRoot.removeAttribute(SUB_ROOT_ATTR);
+    subtitleRoot = el;
+    // An older installed version wrote `background-color: transparent` onto this
+    // node directly. Inline declarations without !important lose to the
+    // stylesheet, but clearing it keeps the DOM honest across an upgrade.
+    el.style.removeProperty("background-color");
+    el.setAttribute(SUB_ROOT_ATTR, "");
   }
 
-  function applySubtitleStyles(video = findVideo()) {
-    ensureSubtitleStyle();
-    if (!subtitleEnabled) {
-      restoreInactiveSubtitleElements();
+  function subtitleRootChanged() {
+    if (subtitleRoot) subtitleRoot.removeAttribute(SUB_ROOT_ATTR);
+    subtitleRoot = null;
+    subtitleCandidate = null;
+    candidateText = "";
+    candidateTurnovers = 0;
+    discoveryMisses = 0;
+  }
+
+  /**
+   * Promotes a container only once it has survived a cue turnover.
+   *
+   * There is no way to tell a persistent captions wrapper from a per-cue block
+   * by inspection — both match the loose selectors, and the mobile build's
+   * class names are hashed. So it is settled empirically: hold the candidate,
+   * and stamp it once its text has changed underneath it while it stayed
+   * connected. If it dies between cues instead, the walk starts one level up.
+   */
+  function trackCandidate(candidate) {
+    if (candidate !== subtitleCandidate) {
+      subtitleCandidate = candidate;
+      candidateText = candidate.textContent || "";
+      candidateTurnovers = 0;
       return;
     }
 
-    clearLegacySubtitleOverrides();
-
-    // Resolve the bg value we want to set inline.
-    // Inline styles always beat CSS rules regardless of specificity, so this is
-    // the only reliable way to override Prime Video's own bg injections.
-    let bgValue;
-    if (subtitleBg === "solid") {
-      bgValue = "rgba(0, 0, 0, 0.92)";
-    } else if (subtitleBg === "transparent") {
-      bgValue = "transparent";
-    } else {
-      // shadow (default)
-      bgValue = "rgba(0, 0, 0, 0.48)";
+    const text = candidate.textContent || "";
+    if (text && text !== candidateText) {
+      candidateText = text;
+      candidateTurnovers += 1;
     }
 
-    const subtitleElements = findSubtitleTextElements(video);
-    restoreInactiveSubtitleElements(subtitleElements);
-
-    const shadowValue = computeScaledShadow();
-    const inlineFontSize = computeSubtitleSizeVh();
-
-    for (const element of subtitleElements) {
-      rememberSubtitleStyles(element);
-      element.style.setProperty("color", subtitleColor, "important");
-      element.style.setProperty("font-size", inlineFontSize, "important");
-      element.style.setProperty("font-weight", "700", "important");
-      element.style.setProperty("line-height", "1.35", "important");
-      element.style.setProperty("background-color", bgValue, "important");
-      element.style.setProperty("text-shadow", shadowValue, "important");
-      if (subtitleBg !== "transparent") {
-        element.style.setProperty("padding", "0.12em 0.35em", "important");
-        element.style.setProperty("border-radius", "4px", "important");
-        element.style.setProperty("-webkit-box-decoration-break", "clone", "important");
-        element.style.setProperty("box-decoration-break", "clone", "important");
-      } else {
-        element.style.removeProperty("padding");
-        element.style.removeProperty("border-radius");
-        element.style.removeProperty("-webkit-box-decoration-break");
-        element.style.removeProperty("box-decoration-break");
-      }
+    if (candidateTurnovers >= 1) {
+      stampSubtitleRoot(candidate);
     }
   }
 
+  function discoverSubtitleRoot() {
+    if (!subtitleEnabled) return;
+    if (subtitleRoot && subtitleRoot.isConnected) return;
+    if (subtitleRoot) subtitleRootChanged();
+
+    const video = findVideo();
+    if (!video) return;
+    const videoRect = video.getBoundingClientRect();
+    if (videoRect.width <= 0 || videoRect.height <= 0) return;
+
+    const leaves = [...findSubtitleTextElements(video)];
+    if (!leaves.length) {
+      // No cue on screen, which is the normal state most of the time. Back off
+      // so an idle player is not paying for a DOM sweep on every insertion.
+      discoveryMisses += 1;
+      return;
+    }
+    discoveryMisses = 0;
+
+    let node = lowestCommonAncestor(leaves);
+    if (!node) return;
+
+    // Take the *highest* ancestor that still looks like a captions region: the
+    // higher it is, the likelier it outlives an individual cue.
+    let best = null;
+    for (let depth = 0; node && depth < 8; depth += 1) {
+      if (isSubtitleContainer(node, videoRect)) best = node;
+      else if (best) break;
+      node = node.parentElement;
+    }
+
+    if (best) trackCandidate(best);
+  }
+
+  function scheduleDiscovery() {
+    if (discoveryTimer || !subtitleEnabled) return;
+    if (subtitleRoot && subtitleRoot.isConnected) return;
+    const delay = discoveryMisses > 4 ? 2000 : 250;
+    discoveryTimer = window.setTimeout(() => {
+      discoveryTimer = 0;
+      discoverSubtitleRoot();
+    }, delay);
+  }
+
+  /**
+   * Marks a freshly-inserted node as a cue, from inside the observer callback.
+   *
+   * MutationObserver callbacks run at the microtask checkpoint, before the next
+   * paint, so the stylesheet rule is resolved in time even for players that
+   * rebuild the container on every cue and therefore never satisfy the
+   * turnover test above. One attribute write, and `data-` attributes are not in
+   * the observer's attributeFilter, so it cannot feed back into itself.
+   */
+  function stampCueNode(node) {
+    if (subtitleRoot && subtitleRoot.contains(node)) return;
+    if (root.contains(node) || node.contains(root)) return;
+
+    let target = null;
+    if (node.matches(SUBTITLE_TEXT_SELECTOR)) target = node;
+    else target = node.querySelector(SUBTITLE_TEXT_SELECTOR);
+    if (!target || target.hasAttribute(SUB_CUE_ATTR)) return;
+    if (target.querySelector(SUBTITLE_CHROME_SELECTOR)) return;
+
+    // The same band the discovery walk uses, and it is not optional here:
+    // SUBTITLE_TEXT_SELECTOR is deliberately loose, so without a geometry gate
+    // this path would stamp the episode title — the one element the gate exists
+    // to protect — the moment Prime inserted it. One forced layout per inserted
+    // cue is a fair price, and it replaces a sweep that ran twenty times a second.
+    const video = attachedVideo;
+    if (!video) return;
+    const videoRect = video.getBoundingClientRect();
+    if (videoRect.height <= 0) return;
+
+    const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    if (rect.height > videoRect.height * 0.45) return;
+    if (rect.top < videoRect.top + videoRect.height * 0.28) return;
+    if (rect.bottom > videoRect.bottom + 4) return;
+
+    target.setAttribute(SUB_CUE_ATTR, "");
+  }
+
+  function clearCueStamps() {
+    for (const el of document.querySelectorAll(`[${SUB_CUE_ATTR}]`)) {
+      el.removeAttribute(SUB_CUE_ATTR);
+    }
+  }
+
+  function observeVideoSize(video) {
+    videoSizeObserver?.disconnect();
+    if (typeof ResizeObserver !== "function") return;
+    // The subtitle size is derived from the video's rendered height, and that
+    // changes on rotation, on fullscreen, and whenever the letterboxing changes
+    // for a different aspect ratio — the last of which fires no window event.
+    videoSizeObserver = new ResizeObserver(() => applySubtitleStyles(video));
+    videoSizeObserver.observe(video);
+  }
+
+  // ── Observer ───────────────────────────────────────────────────────────────
+
+  let currentObservedContainer = null;
+  let subtitleObserver = null;
+  let adCheckQueued = false;
+  let adWatchTimers = [];
+
+  function scheduleAdCheck(delay = 60) {
+    if (adCheckQueued) return;
+    adCheckQueued = true;
+    window.setTimeout(() => {
+      adCheckQueued = false;
+      checkAndHandleAds();
+    }, delay);
+  }
+
+  /**
+   * Re-checks shortly after an ad indicator appears.
+   *
+   * isAdIndicatorActive requires countdown-shaped text, and Prime mounts the
+   * element before filling it in. The insertion is the only mutation record we
+   * get — the text arriving is characterData, which is not observed — so the
+   * check has to be repeated a couple of times or the shield waits for the
+   * safety tick.
+   */
+  function armAdWatch() {
+    for (const timer of adWatchTimers) window.clearTimeout(timer);
+    adWatchTimers = [120, 350, 800].map((delay) =>
+      window.setTimeout(() => checkAndHandleAds(), delay)
+    );
+  }
+
   function updateSubtitleObserver() {
-    // This observer drives both ad detection and subtitle restyling reactions to
-    // DOM mutations, so it must stay connected regardless of subtitleEnabled —
-    // otherwise disabling subtitles would silently degrade ad-detection latency
-    // from "near-instant on mutation" to "up to 200ms" (the setInterval fallback),
-    // an unintended coupling between two unrelated features. Only the subtitle
-    // restyling *action* inside the callback is gated on subtitleEnabled below.
+    // This observer drives both ad detection and subtitle discovery, so it must
+    // stay connected regardless of subtitleEnabled — otherwise disabling
+    // subtitles would silently degrade ad-detection latency from "near-instant
+    // on mutation" to a full safety tick, an unintended coupling between two
+    // unrelated features.
     const video = findVideo();
     const targetContainer = video
       ? (video.closest(".webPlayerSDKContainer, .atvwebplayersdk-player-container, [id*='player' i], #player, .player") || video.parentElement || document.body)
@@ -815,52 +1174,34 @@
       subtitleObserver.disconnect();
     } else {
       subtitleObserver = new MutationObserver((mutations) => {
-        if (mutationThrottleTimer) return;
-        let shouldApplySubtitles = false;
-        let shouldCheckAds = false;
-        let hasNewSubtitleElement = false;
+        // Every record is examined. The previous version dropped the whole
+        // batch whenever a debounce timer was armed, and broke out of the scan
+        // on the first record of either kind — so the record that actually
+        // announced a new cue was routinely thrown away.
+        let sawInsertion = false;
+        let sawAdCandidate = false;
+        let sawAttribute = false;
+
         for (const mutation of mutations) {
-          if (mutation.type === "attributes" && (mutation.attributeName === "style" || mutation.attributeName === "class")) {
-            const target = mutation.target;
-            if (!root.contains(target) && target instanceof HTMLElement) {
-              shouldApplySubtitles = true;
-              shouldCheckAds = true;
-              break;
+          if (mutation.type === "attributes") {
+            sawAttribute = true;
+            continue;
+          }
+          if (mutation.type !== "childList") continue;
+
+          for (const node of mutation.addedNodes) {
+            if (!(node instanceof HTMLElement) || root.contains(node)) continue;
+            sawInsertion = true;
+            if (subtitleEnabled) stampCueNode(node);
+            if (!sawAdCandidate && (node.matches(AD_INDICATOR_SELECTOR) || node.querySelector(AD_INDICATOR_SELECTOR))) {
+              sawAdCandidate = true;
             }
-          } else if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
-            for (const node of mutation.addedNodes) {
-              if (node instanceof HTMLElement && !root.contains(node)) {
-                // Fast-path: detect subtitle element additions immediately to avoid flash.
-                // When Prime Video injects a new subtitle span, apply our styles
-                // synchronously before the browser paints — no 50 ms debounce delay.
-                if (subtitleEnabled && (
-                  node.matches(SUBTITLE_TEXT_SELECTOR) ||
-                  node.querySelector(SUBTITLE_TEXT_SELECTOR) !== null
-                )) {
-                  hasNewSubtitleElement = true;
-                }
-                shouldApplySubtitles = true;
-                shouldCheckAds = true;
-                break;
-              }
-            }
-            if (shouldApplySubtitles) break;
           }
         }
-        // Apply subtitle styles immediately when a new subtitle element appears.
-        // This runs synchronously in the MutationObserver microtask, before the
-        // next paint, so Amazon's default color/size is never visible to the user.
-        if (hasNewSubtitleElement) {
-          applySubtitleStyles();
-        }
-        if (shouldCheckAds || shouldApplySubtitles) {
-          mutationThrottleTimer = window.setTimeout(() => {
-            mutationThrottleTimer = 0;
-            if (shouldCheckAds) checkAndHandleAds();
-            // Skip the deferred subtitle pass if the fast-path already handled it.
-            if (shouldApplySubtitles && subtitleEnabled && !hasNewSubtitleElement) applySubtitleStyles();
-          }, 50);
-        }
+
+        if (sawInsertion) scheduleDiscovery();
+        if (sawAdCandidate) armAdWatch();
+        else if (sawInsertion || sawAttribute) scheduleAdCheck();
       });
     }
 
@@ -873,59 +1214,69 @@
     });
   }
 
+  // ── Setting mutators ───────────────────────────────────────────────────────
+
   function setSpeed(nextSpeed) {
     speed = Number(clamp(nextSpeed).toFixed(2));
-    window.localStorage.setItem(STORAGE_KEY, String(speed));
-    updateButtonDisplay();
-    updateActivePreset();
+    // The rate write is the only thing the user asked for, and it is cheap.
+    // Everything else — storage, label, active states, the rail indicator —
+    // is deferred so it cannot land in the same task as the write.
     applySpeed();
+    persist(STORAGE_KEY, String(speed));
+    scheduleUiSync();
   }
 
   function setSubtitleColor(nextColor) {
     subtitleColor = nextColor;
-    window.localStorage.setItem(SUBTITLE_STORAGE_KEY, subtitleColor);
+    persist(SUBTITLE_STORAGE_KEY, subtitleColor);
     if (!subtitleEnabled) {
       setSubtitleEnabled(true);
       return;
     }
-    updateButtonDisplay();
-    updateActivePreset();
-    ensureSubtitleStyle();
     applySubtitleStyles();
+    scheduleUiSync();
   }
 
   function setSubtitleEnabled(enabled) {
     subtitleEnabled = Boolean(enabled);
-    window.localStorage.setItem(SUBTITLE_ENABLED_KEY, String(subtitleEnabled));
-    updateButtonDisplay();
-    updateActivePreset();
+    persist(SUBTITLE_ENABLED_KEY, String(subtitleEnabled));
+    if (!subtitleEnabled) {
+      subtitleRootChanged();
+      clearCueStamps();
+    }
     ensureSubtitleStyle();
     applySubtitleStyles();
     updateSubtitleObserver();
+    scheduleDiscovery();
+    scheduleUiSync();
   }
 
   function setSubtitleSize(val) {
     const pct = parseInt(val, 10);
     if (!Number.isFinite(pct) || pct < 50 || pct > 400) return;
     subtitleSize = pct + "%";
-    window.localStorage.setItem(SUBTITLE_SIZE_KEY, subtitleSize);
-    ensureSubtitleStyle();
+    persist(SUBTITLE_SIZE_KEY, subtitleSize);
     applySubtitleStyles();
-    // Sync the input element if visible
-    const inp = document.getElementById("pvsc-size-input");
-    if (inp && inp.value !== String(pct)) inp.value = String(pct);
-    updateActivePreset();
+    scheduleUiSync();
   }
 
   function cycleSubtitleBg() {
     if (subtitleBg === "shadow") subtitleBg = "solid";
     else if (subtitleBg === "solid") subtitleBg = "transparent";
     else subtitleBg = "shadow";
-    window.localStorage.setItem(SUBTITLE_BG_KEY, subtitleBg);
-    ensureSubtitleStyle();
+    persist(SUBTITLE_BG_KEY, subtitleBg);
     applySubtitleStyles();
-    updateActivePreset();
+    scheduleUiSync();
   }
+
+  function setPreservePitch(enabled) {
+    preservePitch = Boolean(enabled);
+    persist(PRESERVE_PITCH_KEY, String(preservePitch));
+    applySpeed();
+    scheduleUiSync();
+  }
+
+  // ── 7. Panel styles ────────────────────────────────────────────────────────
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) {
@@ -934,31 +1285,346 @@
 
     const style = document.createElement("style");
     style.id = STYLE_ID;
+    // Design note: this panel sits on top of a moving picture, so it borrows
+    // the one visual language that has always lived there — the broadcast
+    // caption block. Flat, opaque, hard-edged, one accent (CEA-608 caption
+    // yellow, which is also this app's default subtitle colour), and emphasis
+    // by inversion rather than by fill. There is deliberately no backdrop
+    // blur: it is a per-frame GPU cost over playing video, and on a low-end
+    // phone that is not decoration anyone is paying for.
+    //
+    // Breakpoints change tokens only, never rules. That is what keeps the
+    // three layouts from turning back into a stack of !important overrides.
     style.textContent = `
-      /* Amazon's page styles do not reach into the panel, so nothing sets this
-         for us. Without it the full-width mobile sheet is 100% + 40px of
-         padding and its right-hand column is clipped off-screen. */
-      #${ROOT_ID}, #${ROOT_ID} * {
-        box-sizing: border-box;
-      }
       #${ROOT_ID} {
+        --pvsc-ink: #0A0A0B;
+        --pvsc-ink-2: #17171A;
+        --pvsc-ink-3: #232328;
+        --pvsc-line: rgba(255, 255, 255, 0.14);
+        --pvsc-text: #F2F2F3;
+        --pvsc-dim: rgba(242, 242, 243, 0.52);
+        --pvsc-live: #FFCC00;
+        --pvsc-radius: 4px;
+        --pvsc-gap: 8px;
+        --pvsc-ctl: 32px;
+        --pvsc-pad: 12px;
+        --pvsc-panel-w: 240px;
+        --pvsc-label: 10px;
+        --pvsc-body: 12px;
+        --pvsc-launcher-w: 76px;
+        --pvsc-launcher-h: 34px;
+        --pvsc-launcher-shift: 0px;
+        --pvsc-swatch: 28px;
+        --pvsc-cols: 1;
+        --pvsc-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --pvsc-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", "Droid Sans Mono", monospace;
+
         position: fixed;
         top: 76px;
         right: 18px;
         z-index: 2147483647;
         display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        color: #f7f7f8;
-        font: 650 13px/1.2 Arial, sans-serif;
+        color: var(--pvsc-text);
+        font-family: var(--pvsc-font);
+        font-size: var(--pvsc-body);
+        line-height: 1.2;
         pointer-events: auto;
         transition: opacity 220ms ease;
+      }
+      #${ROOT_ID}, #${ROOT_ID} * {
+        box-sizing: border-box;
       }
       #${ROOT_ID}.pvsc-hidden {
         opacity: 0;
         pointer-events: none;
       }
-      @media (pointer: coarse), (hover: none) {
+      #${ROOT_ID}.pvsc-no-video {
+        display: none;
+      }
+
+      /* ── Launcher ─────────────────────────────────────────────────────── */
+      .pvsc-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+      .pvsc-launcher {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        /* Fixed width, not min-width. The label swings between "1x" and
+           "1.25x", and a growing button used to force a re-clamp — a synchronous
+           layout, inside the click handler, on the same task as the rate write.
+           Tabular figures plus a fixed box means the width never changes. */
+        width: var(--pvsc-launcher-w);
+        height: var(--pvsc-launcher-h);
+        padding: 0;
+        color: var(--pvsc-text);
+        font-family: var(--pvsc-mono);
+        font-size: var(--pvsc-body);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        background: rgba(10, 10, 11, 0.72);
+        border: 1px solid var(--pvsc-line);
+        border-radius: var(--pvsc-radius);
+        cursor: grab;
+        user-select: none;
+        /* Required for pointer-event dragging on touch: without it the browser
+           claims the gesture for panning and fires pointercancel. */
+        touch-action: none;
+        transform: translateX(var(--pvsc-launcher-shift));
+        transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+                    background 160ms ease, border-color 160ms ease;
+      }
+      .pvsc-launcher:active { cursor: grabbing; }
+      .pvsc-launcher:hover,
+      .pvsc-launcher:focus-visible {
+        background: var(--pvsc-ink);
+        border-color: rgba(255, 255, 255, 0.28);
+        outline: none;
+      }
+      .pvsc-launcher-dot {
+        font-size: 11px;
+        line-height: 1;
+      }
+
+      /* ── Panel shell ──────────────────────────────────────────────────── */
+      .pvsc-panel {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        display: none;
+        flex-direction: column;
+        gap: var(--pvsc-gap);
+        width: var(--pvsc-panel-w);
+        padding: var(--pvsc-pad);
+        background: var(--pvsc-ink);
+        border: 1px solid var(--pvsc-line);
+        border-radius: var(--pvsc-radius);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      #${ROOT_ID}.pvsc-menu-open .pvsc-panel {
+        display: flex;
+      }
+      .pvsc-eyebrow {
+        font-size: var(--pvsc-label);
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--pvsc-dim);
+      }
+      .pvsc-rule {
+        height: 1px;
+        margin: 0;
+        border: 0;
+        background: var(--pvsc-line);
+      }
+      .pvsc-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--pvsc-gap);
+      }
+      .pvsc-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .pvsc-label {
+        font-size: var(--pvsc-label);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--pvsc-dim);
+        flex-shrink: 0;
+      }
+
+      /* ── Shared control chrome ────────────────────────────────────────── */
+      .pvsc-panel button,
+      .pvsc-panel input {
+        height: var(--pvsc-ctl);
+        color: var(--pvsc-text);
+        font-family: var(--pvsc-font);
+        font-size: var(--pvsc-body);
+        background: var(--pvsc-ink-2);
+        border: 1px solid var(--pvsc-line);
+        border-radius: var(--pvsc-radius);
+        cursor: pointer;
+        user-select: none;
+        transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+      }
+      .pvsc-panel button:hover {
+        background: var(--pvsc-ink-3);
+      }
+      .pvsc-panel button:focus-visible,
+      .pvsc-panel input:focus-visible {
+        outline: 2px solid var(--pvsc-live);
+        outline-offset: 1px;
+      }
+
+      /* ── Speed: stepper + rail ────────────────────────────────────────── */
+      .pvsc-stepper {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .pvsc-stepper button {
+        width: var(--pvsc-ctl);
+        flex-shrink: 0;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .pvsc-readout {
+        min-width: 52px;
+        text-align: center;
+        font-family: var(--pvsc-mono);
+        font-size: var(--pvsc-body);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: var(--pvsc-live);
+      }
+      .pvsc-rail {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 2px;
+        padding: 2px;
+        background: var(--pvsc-ink-2);
+        border: 1px solid var(--pvsc-line);
+        border-radius: var(--pvsc-radius);
+      }
+      /* The signature element: emphasis by inversion, the way a caption block
+         marks emphasis, on a strip that reads as a transport control. */
+      .pvsc-rail-marker {
+        position: absolute;
+        top: 2px;
+        left: 0;
+        height: calc(100% - 4px);
+        background: var(--pvsc-live);
+        border-radius: 2px;
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+                    width 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+                    opacity 120ms ease;
+      }
+      .pvsc-rail button {
+        position: relative;
+        z-index: 1;
+        height: calc(var(--pvsc-ctl) - 4px);
+        padding: 0 2px;
+        font-family: var(--pvsc-mono);
+        font-size: var(--pvsc-body);
+        font-variant-numeric: tabular-nums;
+        background: transparent;
+        border: 0;
+        border-radius: 2px;
+      }
+      .pvsc-rail button:hover {
+        background: rgba(255, 255, 255, 0.07);
+      }
+      .pvsc-rail button.pvsc-on {
+        color: var(--pvsc-ink);
+        font-weight: 700;
+        background: transparent;
+      }
+
+      /* ── Subtitles ────────────────────────────────────────────────────── */
+      .pvsc-switch {
+        min-width: 46px;
+        padding: 0 10px;
+        font-size: var(--pvsc-label);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .pvsc-switch.pvsc-on {
+        color: var(--pvsc-ink);
+        background: var(--pvsc-live);
+        border-color: var(--pvsc-live);
+      }
+      .pvsc-switch.pvsc-on:hover {
+        background: var(--pvsc-live);
+      }
+      .pvsc-swatches {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+      }
+      /* Scoped through .pvsc-panel so it outranks the shared button chrome
+         above, which would otherwise force the swatch to the control height. */
+      .pvsc-panel .pvsc-swatch {
+        width: 100%;
+        height: var(--pvsc-swatch);
+        padding: 0;
+        border: 2px solid rgba(255, 255, 255, 0.22);
+        border-radius: var(--pvsc-radius);
+      }
+      .pvsc-swatch.pvsc-on {
+        border-color: var(--pvsc-text);
+        box-shadow: 0 0 0 2px var(--pvsc-live);
+      }
+      .pvsc-size-input {
+        flex: 1;
+        min-width: 0;
+        padding: 0 4px;
+        font-family: var(--pvsc-mono);
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+        -moz-appearance: textfield;
+      }
+      .pvsc-size-input::-webkit-outer-spin-button,
+      .pvsc-size-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .pvsc-value-btn {
+        flex: 1;
+        min-width: 0;
+        padding: 0 8px;
+      }
+
+      /* ── Actions ──────────────────────────────────────────────────────── */
+      .pvsc-col {
+        display: flex;
+        flex-direction: column;
+        gap: var(--pvsc-gap);
+        min-width: 0;
+      }
+      .pvsc-cols {
+        display: grid;
+        grid-template-columns: repeat(var(--pvsc-cols), minmax(0, 1fr));
+        gap: var(--pvsc-gap);
+        align-items: start;
+      }
+      .pvsc-skip {
+        width: 100%;
+        padding: 0 8px;
+      }
+      .pvsc-stats {
+        font-family: var(--pvsc-mono);
+        font-size: var(--pvsc-label);
+        font-variant-numeric: tabular-nums;
+        color: var(--pvsc-dim);
+        text-align: center;
+      }
+
+      /* ══ Touch: bigger targets, panel becomes a sheet ══════════════════ */
+      @media ${TOUCH_QUERY} {
+        #${ROOT_ID} {
+          --pvsc-ctl: 44px;
+          --pvsc-gap: 10px;
+          --pvsc-pad: 16px;
+          --pvsc-label: 11px;
+          --pvsc-body: 14px;
+          --pvsc-launcher-w: 84px;
+          --pvsc-launcher-h: 44px;
+          --pvsc-swatch: 40px;
+        }
         /* On touch there is no hover to bring the control back, and a tap that
            passes through to the player toggles Prime's own overlay instead. So
            the idle state stays dimly visible and tappable rather than gone. */
@@ -966,257 +1632,62 @@
           opacity: 0.32;
           pointer-events: auto;
         }
-      }
-      #${ROOT_ID}.pvsc-no-video {
-        display: none;
-      }
-      .pvsc-wrap {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-      }
-      .pvsc-speed-button {
-        min-width: 54px;
-        height: 38px;
-        padding: 0 12px;
-        color: #f7f7f8;
-        font: inherit;
-        cursor: grab;
-        background: transparent;
-        border: 1px solid transparent;
-        border-radius: 10px;
-        box-shadow: none;
-        user-select: none;
-        /* Required for pointer-event dragging on touch: without it the browser
-           claims the gesture for panning and fires pointercancel. */
-        touch-action: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 1);
-        transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
-      }
-      .pvsc-speed-button:active {
-        cursor: grabbing;
-      }
-      .pvsc-menu {
-        position: absolute;
-        top: calc(100% + 8px);
-        right: 0;
-        display: none;
-        flex-direction: column;
-        gap: 10px;
-        width: 196px;
-        padding: 12px;
-        background: rgba(20, 22, 28, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 14px;
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(14px);
-        max-height: calc(100vh - 24px);
-        overflow-y: auto;
-        overscroll-behavior: contain;
-      }
-      #${ROOT_ID}.pvsc-menu-open .pvsc-menu {
-        display: flex;
-      }
-      .pvsc-section-title {
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.58);
-        margin-bottom: 2px;
-      }
-      .pvsc-speed-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px;
-      }
-      .pvsc-menu button {
-        width: 100%;
-        height: 34px;
-        padding: 0 8px;
-        color: #f7f7f8;
-        font: inherit;
-        cursor: pointer;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 8px;
-        user-select: none;
-        transition: background 120ms ease, border-color 120ms ease;
-      }
-      .pvsc-speed-button:hover,
-      .pvsc-speed-button:focus {
-        background: rgba(25, 25, 25, 0.6);
-        border-color: rgba(255, 255, 255, 0.2);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(8px);
-        outline: none;
-      }
-      @media (pointer: coarse), (hover: none) {
-        /* Hover is the only thing that made the button look like a button.
-           Touch users need that chrome in the resting state instead. */
-        .pvsc-speed-button {
-          background: rgba(20, 22, 28, 0.72);
-          border-color: rgba(255, 255, 255, 0.22);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        .pvsc-launcher {
+          background: rgba(10, 10, 11, 0.82);
+          border-color: rgba(255, 255, 255, 0.24);
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        }
+        .pvsc-panel {
+          position: fixed;
+          inset: auto 0 0 0;
+          width: 100%;
+          max-width: 100%;
+          max-height: 82vh;
+          border-radius: 12px 12px 0 0;
+          border-bottom: 0;
+          padding-bottom: max(var(--pvsc-pad), env(safe-area-inset-bottom, 0px));
+          padding-left: max(var(--pvsc-pad), env(safe-area-inset-left, 0px));
+          padding-right: max(var(--pvsc-pad), env(safe-area-inset-right, 0px));
+          box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.75);
         }
       }
-      .pvsc-menu button:hover,
-      .pvsc-menu button:focus {
-        background: rgba(255, 255, 255, 0.18);
-        outline: none;
-      }
-      .pvsc-menu .pvsc-step {
-        font-size: 17px;
-        font-weight: 700;
-      }
-      .pvsc-menu .pvsc-active {
-        color: #ffffff;
-        border-color: rgba(99, 179, 237, 0.72);
-        background: rgba(46, 118, 211, 0.62);
-      }
-      .pvsc-divider {
-        height: 1px;
-        background: rgba(255, 255, 255, 0.12);
-        margin: 2px 0;
-      }
-      .pvsc-subtitle-toggle {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: 100%;
-        height: 34px;
-        padding: 0 10px;
-        color: #f7f7f8;
-        font: inherit;
-        font-size: 12px;
-        cursor: pointer;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 8px;
-        user-select: none;
-      }
-      .pvsc-subtitle-toggle.pvsc-toggle-on {
-        background: rgba(46, 184, 114, 0.28);
-        border-color: rgba(46, 184, 114, 0.65);
-        color: #ffffff;
-      }
-      .pvsc-color-grid {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 8px;
-        padding-top: 2px;
-      }
-      .pvsc-color-swatch {
-        width: 28px !important;
-        height: 28px !important;
-        padding: 0 !important;
-        border-radius: 50% !important;
-        cursor: pointer;
-        border: 2px solid rgba(255, 255, 255, 0.28) !important;
-        position: relative;
-      }
-      .pvsc-color-swatch:hover {
-        transform: scale(1.08);
-      }
-      .pvsc-color-swatch.pvsc-swatch-active {
-        border-color: #ffffff !important;
-        box-shadow: 0 0 0 2px #3182ce, 0 0 8px rgba(255, 255, 255, 0.6);
-      }
-      .pvsc-stats-row {
-        font-size: 10px;
-        text-align: center;
-        color: rgba(255, 255, 255, 0.4);
-        padding-top: 4px;
-        margin-top: 2px;
-      }
-      .pvsc-subtitle-advanced-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px;
-        margin-top: 4px;
-      }
-      /* Keyed on pointer type, not width: in landscape a phone reports 800px
-         wide, which a max-width breakpoint would wrongly treat as desktop. */
-      @media (pointer: coarse), (hover: none), (max-width: 768px) {
-        .pvsc-menu {
-          position: fixed !important;
-          bottom: 0 !important;
-          top: auto !important;
-          left: 0 !important;
-          right: 0 !important;
-          width: 100% !important;
-          max-width: 100% !important;
-          border-radius: 20px 20px 0 0 !important;
-          border-bottom: none !important;
-          padding: 16px 20px max(20px, env(safe-area-inset-bottom)) 20px !important;
-          box-shadow: 0 -8px 36px rgba(0, 0, 0, 0.75) !important;
-          z-index: 2147483647 !important;
-          max-height: 82vh !important;
-          overflow-y: auto !important;
+
+      /* ══ Touch landscape: side sheet, two columns, no scrolling ════════ */
+      @media (pointer: coarse) and (orientation: landscape),
+             (hover: none) and (orientation: landscape),
+             (max-width: 768px) and (orientation: landscape) {
+        #${ROOT_ID} {
+          --pvsc-ctl: 38px;
+          --pvsc-gap: 7px;
+          --pvsc-pad: 12px;
+          --pvsc-body: 13px;
+          --pvsc-swatch: 34px;
+          --pvsc-panel-w: min(440px, 58vw);
+          --pvsc-cols: 2;
         }
-        .pvsc-speed-button {
-          min-width: 62px !important;
-          height: 44px !important;
-        }
-        #pvsc-size-input {
-          height: 44px !important;
-          font-size: 15px !important;
-        }
-        .pvsc-section-title {
-          font-size: 12px !important;
-        }
-        .pvsc-stats-row {
-          font-size: 12px !important;
-        }
-        .pvsc-speed-grid {
-          grid-template-columns: repeat(4, 1fr) !important;
-        }
-        .pvsc-subtitle-advanced-grid {
-          grid-template-columns: repeat(2, 1fr) !important;
-        }
-        .pvsc-menu button {
-          height: 46px !important;
-          font-size: 15px !important;
-        }
-        .pvsc-color-swatch {
-          width: 44px !important;
-          height: 44px !important;
+        .pvsc-panel {
+          left: auto;
+          width: var(--pvsc-panel-w);
+          max-width: var(--pvsc-panel-w);
+          /* Two columns is what makes this fit. The single-column sheet needed
+             ~440px of height in a 360px-tall viewport, so it always scrolled —
+             on the axis a phone in landscape has least of. */
+          max-height: calc(100vh - 16px);
+          border-radius: 12px 0 0 0;
         }
       }
-      /* Landscape is where people actually watch, and a full-width sheet there
-         buries the picture behind the controls. Anchoring a narrower panel to
-         one side keeps the video watchable while adjusting it. */
-      @media (pointer: coarse) and (orientation: landscape), (hover: none) and (orientation: landscape) {
-        .pvsc-menu {
-          left: auto !important;
-          width: min(420px, 62vw) !important;
-          max-width: 62vw !important;
-          max-height: 94vh !important;
-          border-radius: 18px 0 0 0 !important;
-          padding: 10px 16px max(10px, env(safe-area-inset-bottom)) 16px !important;
-          gap: 7px !important;
-        }
-        .pvsc-speed-grid {
-          grid-template-columns: repeat(4, 1fr) !important;
-          gap: 5px !important;
-        }
-        .pvsc-menu button {
-          height: 42px !important;
-        }
-        .pvsc-color-swatch {
-          width: 38px !important;
-          height: 38px !important;
-        }
-        #pvsc-size-input {
-          height: 42px !important;
+
+      @media (prefers-reduced-motion: reduce) {
+        #${ROOT_ID} *,
+        #${ROOT_ID} {
+          transition-duration: 0ms !important;
         }
       }
     `;
     document.documentElement.appendChild(style);
   }
+
+  // ── 8. Panel DOM ───────────────────────────────────────────────────────────
 
   function clickSkipButtons() {
     let clicked = 0;
@@ -1231,7 +1702,7 @@
     return clicked;
   }
 
-  function makeMenuButton(text, className, onClick) {
+  function makeButton(text, className, onClick) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = className;
@@ -1251,16 +1722,19 @@
     return rect.width > 12 && rect.height > 12 && style.visibility !== "hidden" && style.display !== "none";
   }
 
-  const IS_TOUCH = (() => {
-    try {
-      return window.matchMedia("(pointer: coarse)").matches
-        || window.matchMedia("(hover: none)").matches;
-    } catch {
-      return false;
-    }
-  })();
+  let closeButtonCache = null;
+  let closeButtonCacheKey = "";
 
   function findCloseButton() {
+    // Sweeping every interactive element in Prime's DOM and calling
+    // getComputedStyle on each is one of the most expensive things this script
+    // can do, so the result is cached per document/viewport and only computed
+    // when the panel actually has nowhere else to go.
+    const cacheKey = `${location.pathname}|${window.innerWidth}x${window.innerHeight}`;
+    if (closeButtonCacheKey === cacheKey && closeButtonCache?.isConnected) {
+      return closeButtonCache;
+    }
+
     const candidates = Array.from(document.querySelectorAll("button, [role='button'], [aria-label], [title]"));
     let fallback = null;
 
@@ -1281,6 +1755,8 @@
       ].filter(Boolean).join(" ").toLowerCase();
 
       if (/(close|exit|dismiss|kapat|çık|cikis|çikiş|x\b)/i.test(label)) {
+        closeButtonCacheKey = cacheKey;
+        closeButtonCache = element;
         return element;
       }
 
@@ -1289,30 +1765,39 @@
       }
     }
 
+    closeButtonCacheKey = cacheKey;
+    closeButtonCache = fallback;
     return fallback;
   }
 
-  function readSavedPosition() {
-    try {
-      const position = JSON.parse(window.localStorage.getItem(POSITION_KEY) || "null");
-      if (position && Number.isFinite(position.left) && Number.isFinite(position.top)) {
-        return position;
-      }
-    } catch {
-      return null;
-    }
+  let savedPositionCache;
 
-    return null;
+  function readSavedPosition() {
+    if (savedPositionCache !== undefined) return savedPositionCache;
+    try {
+      const position = JSON.parse(readStored(POSITION_KEY) || "null");
+      savedPositionCache = position && Number.isFinite(position.left) && Number.isFinite(position.top)
+        ? position
+        : null;
+    } catch {
+      savedPositionCache = null;
+    }
+    return savedPositionCache;
   }
 
   function clampPosition(left, top) {
     const rect = root.getBoundingClientRect();
-    const width = rect.width || 54;
-    const height = rect.height || 38;
+    // The fallbacks matter: while no video is on screen the panel is
+    // display:none and measures 0x0, and that is exactly when the saved
+    // position is first restored. Reading the launcher tokens keeps the
+    // fallback correct on both layouts instead of hard-coding desktop sizes.
+    const styles = window.getComputedStyle(root);
+    const width = rect.width || parseFloat(styles.getPropertyValue("--pvsc-launcher-w")) || 76;
+    const height = rect.height || parseFloat(styles.getPropertyValue("--pvsc-launcher-h")) || 34;
 
     return {
-      left: Math.min(Math.max(8, left), window.innerWidth - width - 8),
-      top: Math.min(Math.max(8, top), window.innerHeight - height - 8),
+      left: Math.min(Math.max(8, left), Math.max(8, window.innerWidth - width - 8)),
+      top: Math.min(Math.max(8, top), Math.max(8, window.innerHeight - height - 8)),
     };
   }
 
@@ -1323,7 +1808,8 @@
     root.style.right = "auto";
 
     if (save) {
-      window.localStorage.setItem(POSITION_KEY, JSON.stringify(position));
+      savedPositionCache = position;
+      persist(POSITION_KEY, JSON.stringify(position));
     }
   }
 
@@ -1336,8 +1822,8 @@
 
     const closeRect = closeButton.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
-    const width = rootRect.width || 54;
-    const height = rootRect.height || 38;
+    const width = rootRect.width || 76;
+    const height = rootRect.height || 34;
     let left = closeRect.right + 10;
 
     if (left + width > window.innerWidth - 8) {
@@ -1377,7 +1863,6 @@
   function refresh() {
     ensureRootAttached();
     ensureAdShieldStyle();
-    checkAndHandleAds();
 
     const video = findVideo();
     if (!video) {
@@ -1389,60 +1874,138 @@
     root.classList.remove("pvsc-no-video");
     attachVideoListeners(video);
 
-    // The close-button heuristic assumes a desktop title bar and on a phone it
-    // parks the panel on top of Prime's own control row (volume / close), where
-    // the two fight for the same taps. Touch devices get a fixed safe corner
-    // clear of that row instead; the panel is still draggable from there.
-    const closeButton = IS_TOUCH ? null : findCloseButton();
-    if (closeButton) {
-      placeNearCloseButton(closeButton);
-    } else if (!readSavedPosition()) {
-      if (IS_TOUCH) {
+    if (!readSavedPosition()) {
+      // The close-button heuristic assumes a desktop title bar and on a phone it
+      // parks the panel on top of Prime's own control row (volume / close), where
+      // the two fight for the same taps. Touch devices get a fixed safe corner
+      // clear of that row instead; the panel is still draggable from there.
+      const closeButton = isTouch ? null : findCloseButton();
+      if (closeButton) {
+        placeNearCloseButton(closeButton);
+      } else if (isTouch) {
         // 110px down clears Prime's own top control row.
-        const width = root.getBoundingClientRect().width || 62;
+        const width = root.getBoundingClientRect().width || 84;
         setPosition(window.innerWidth - width - 12, 110, false);
       } else if (lastKnownMenuPos) {
         setPosition(lastKnownMenuPos.left, lastKnownMenuPos.top, false);
       } else {
-        setPosition(window.innerWidth - 76, 78, false);
+        setPosition(window.innerWidth - 96, 78, false);
       }
     }
 
     updateSubtitleObserver();
-    applySubtitleStyles();
+    applySubtitleStyles(video);
+    scheduleDiscovery();
   }
 
-  function updateActivePreset() {
-    for (const button of menu.querySelectorAll("[data-speed]")) {
-      const value = Number(button.getAttribute("data-speed"));
-      button.classList.toggle("pvsc-active", Math.abs(value - speed) < 0.001);
+  // ── UI sync (rAF-coalesced) ────────────────────────────────────────────────
+
+  let uiSyncHandle = 0;
+
+  function scheduleUiSync() {
+    if (uiSyncHandle) return;
+    uiSyncHandle = window.requestAnimationFrame(() => {
+      uiSyncHandle = 0;
+      syncUi();
+    });
+  }
+
+  function syncUi() {
+    launcherValue.textContent = format(speed);
+    if (subtitleEnabled) {
+      launcherDot.textContent = "●";
+      launcherDot.style.color = subtitleColor;
+    } else {
+      launcherDot.textContent = "○";
+      launcherDot.style.color = "rgba(255,255,255,0.4)";
     }
 
-    if (subtitleToggleBtn) {
-      subtitleToggleBtn.classList.toggle("pvsc-toggle-on", subtitleEnabled);
-      subtitleToggleBtn.textContent = subtitleEnabled ? "Subtitles: ON ✓" : "Subtitles: OFF";
+    readout.textContent = format(speed);
+
+    for (const stop of stopButtons) {
+      const value = Number(stop.getAttribute("data-speed"));
+      stop.classList.toggle("pvsc-on", Math.abs(value - speed) < 0.001);
+    }
+    updateRailMarker();
+
+    subtitleSwitch.textContent = subtitleEnabled ? "On" : "Off";
+    subtitleSwitch.classList.toggle("pvsc-on", subtitleEnabled);
+
+    pitchSwitch.textContent = preservePitch ? "On" : "Off";
+    pitchSwitch.classList.toggle("pvsc-on", preservePitch);
+
+    const pct = parseInt(subtitleSize, 10);
+    if (Number.isFinite(pct) && sizeInput.value !== String(pct) && document.activeElement !== sizeInput) {
+      sizeInput.value = String(pct);
     }
 
-    // Sync size input display value
-    const inp = document.getElementById("pvsc-size-input");
-    if (inp) {
-      const pct = parseInt(subtitleSize, 10);
-      if (Number.isFinite(pct) && inp.value !== String(pct)) inp.value = String(pct);
-    }
+    let bgLabel = "Shadow";
+    if (subtitleBg === "solid") bgLabel = "Solid";
+    else if (subtitleBg === "transparent") bgLabel = "None";
+    bgButton.textContent = bgLabel;
 
-    const bgBtn = document.getElementById("pvsc-btn-subbg");
-    if (bgBtn) {
-      let bgLabel = "Shadow";
-      if (subtitleBg === "solid") bgLabel = "Solid";
-      else if (subtitleBg === "transparent") bgLabel = "None";
-      bgBtn.textContent = "Bg: " + bgLabel;
-    }
-
-    for (const swatch of menu.querySelectorAll("[data-color]")) {
+    for (const swatch of swatchButtons) {
       const colorVal = swatch.getAttribute("data-color");
-      swatch.classList.toggle("pvsc-swatch-active", subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase());
+      swatch.classList.toggle("pvsc-on", subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase());
     }
+
     updateStatsDisplay();
+    updateLauncherShift();
+  }
+
+  function updateRailMarker() {
+    const index = PRESET_SPEEDS.findIndex((preset) => Math.abs(preset - speed) < 0.001);
+    if (index < 0 || !isMenuOpen) {
+      railMarker.style.opacity = "0";
+      return;
+    }
+    const stop = stopButtons[index];
+    // offsetLeft/offsetWidth are only meaningful once the panel is laid out,
+    // which is why this runs from the rAF sync and on menu open rather than
+    // straight out of the click handler.
+    if (!stop.offsetWidth) {
+      railMarker.style.opacity = "0";
+      return;
+    }
+    // offsetLeft and `left: 0` are both resolved against the offsetParent's
+    // padding edge — the rail is position:relative, so the two share an origin
+    // and the offset can be used as the translation directly.
+    railMarker.style.width = `${stop.offsetWidth}px`;
+    railMarker.style.transform = `translateX(${stop.offsetLeft}px)`;
+    railMarker.style.opacity = "1";
+  }
+
+  /**
+   * Moves the launcher clear of the open panel when the two overlap.
+   *
+   * In touch landscape the sheet is anchored bottom-right and the launcher's
+   * default corner sits inside it, so opening the panel used to bury its own
+   * dismiss target — the only ways out were a tap on the remaining strip of
+   * video, Escape, or the Android back button.
+   *
+   * Decided purely on measured geometry rather than on which breakpoint is
+   * active. "Is the button covered" is a question the rects answer directly,
+   * and reading them cannot fall out of step with the CSS the way a cached
+   * orientation flag can.
+   */
+  function updateLauncherShift() {
+    root.style.setProperty("--pvsc-launcher-shift", "0px");
+    if (!isMenuOpen) return;
+
+    const panelRect = panel.getBoundingClientRect();
+    const buttonRect = launcher.getBoundingClientRect();
+    if (panelRect.width === 0 || buttonRect.width === 0) return;
+
+    const overlaps = buttonRect.right > panelRect.left
+      && buttonRect.left < panelRect.right
+      && buttonRect.bottom > panelRect.top
+      && buttonRect.top < panelRect.bottom;
+    if (!overlaps) return;
+
+    // Clamped so shifting clear of the panel can never push it off the left edge.
+    const wanted = panelRect.left - 8 - buttonRect.right;
+    const shift = Math.max(wanted, 8 - buttonRect.left);
+    root.style.setProperty("--pvsc-launcher-shift", `${Math.min(0, Math.round(shift))}px`);
   }
 
   function showControls() {
@@ -1474,7 +2037,9 @@
     if (open) {
       root.classList.remove("pvsc-hidden");
       window.clearTimeout(hideTimer);
+      scheduleUiSync();
     } else {
+      root.style.setProperty("--pvsc-launcher-shift", "0px");
       showControls();
     }
   }
@@ -1491,153 +2056,153 @@
   const root = document.createElement("div");
   root.id = ROOT_ID;
   root.className = "pvsc-no-video";
-  root.setAttribute("aria-label", "Prime Video speed & subtitle control");
+  root.setAttribute("aria-label", "Prime Video speed and subtitle controls");
 
   const wrap = document.createElement("div");
   wrap.className = "pvsc-wrap";
 
-  const speedButton = document.createElement("button");
-  speedButton.type = "button";
-  speedButton.className = "pvsc-speed-button";
-  speedButton.title = "Playback speed & subtitle control";
+  const launcher = document.createElement("button");
+  launcher.type = "button";
+  launcher.className = "pvsc-launcher";
+  launcher.title = "Playback speed and subtitle controls";
+  launcher.setAttribute("aria-haspopup", "true");
+  const launcherValue = document.createElement("span");
+  const launcherDot = document.createElement("span");
+  launcherDot.className = "pvsc-launcher-dot";
+  launcher.append(launcherValue, launcherDot);
 
-  const menu = document.createElement("div");
-  menu.className = "pvsc-menu";
+  const panel = document.createElement("div");
+  panel.className = "pvsc-panel";
+  panel.setAttribute("role", "group");
 
-  const speedTitle = document.createElement("div");
-  speedTitle.className = "pvsc-section-title";
-  speedTitle.textContent = "⚡ Speed";
-  menu.appendChild(speedTitle);
+  // ── Speed band ─────────────────────────────────────────────────────────────
+  const speedHead = document.createElement("div");
+  speedHead.className = "pvsc-head";
+  const speedEyebrow = document.createElement("span");
+  speedEyebrow.className = "pvsc-eyebrow";
+  speedEyebrow.textContent = "Speed";
 
-  const speedGrid = document.createElement("div");
-  speedGrid.className = "pvsc-speed-grid";
-  speedGrid.appendChild(makeMenuButton("-", "pvsc-step", () => setSpeed(speed - STEP)));
-  speedGrid.appendChild(makeMenuButton("+", "pvsc-step", () => setSpeed(speed + STEP)));
+  const stepper = document.createElement("div");
+  stepper.className = "pvsc-stepper";
+  const readout = document.createElement("span");
+  readout.className = "pvsc-readout";
+  readout.setAttribute("aria-live", "polite");
+  const stepDown = makeButton("−", "", () => setSpeed(speed - STEP));
+  stepDown.setAttribute("aria-label", "Slower");
+  const stepUp = makeButton("+", "", () => setSpeed(speed + STEP));
+  stepUp.setAttribute("aria-label", "Faster");
+  stepper.append(stepDown, readout, stepUp);
+  speedHead.append(speedEyebrow, stepper);
 
-  for (const preset of PRESET_SPEEDS) {
-    const presetButton = makeMenuButton(format(preset), "", () => {
-      setSpeed(preset);
-      setMenuOpen(false);
-    });
-    presetButton.setAttribute("data-speed", String(preset));
-    speedGrid.appendChild(presetButton);
-  }
-  menu.appendChild(speedGrid);
+  const rail = document.createElement("div");
+  rail.className = "pvsc-rail";
+  const railMarker = document.createElement("div");
+  railMarker.className = "pvsc-rail-marker";
+  rail.appendChild(railMarker);
 
-  const divider = document.createElement("div");
-  divider.className = "pvsc-divider";
-  menu.appendChild(divider);
-
-  const subtitleTitle = document.createElement("div");
-  subtitleTitle.className = "pvsc-section-title";
-  subtitleTitle.textContent = "💬 Subtitles";
-  menu.appendChild(subtitleTitle);
-
-  const subtitleToggleBtn = document.createElement("button");
-  subtitleToggleBtn.type = "button";
-  subtitleToggleBtn.className = "pvsc-subtitle-toggle";
-  subtitleToggleBtn.textContent = subtitleEnabled ? "Subtitles: ON ✓" : "Subtitles: OFF";
-  subtitleToggleBtn.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setSubtitleEnabled(!subtitleEnabled);
-    showControls();
+  const stopButtons = PRESET_SPEEDS.map((preset) => {
+    const stop = makeButton(formatStop(preset), "", () => setSpeed(preset));
+    stop.setAttribute("data-speed", String(preset));
+    stop.setAttribute("aria-label", `${formatStop(preset)} times speed`);
+    rail.appendChild(stop);
+    return stop;
   });
-  menu.appendChild(subtitleToggleBtn);
 
-  const colorGrid = document.createElement("div");
-  colorGrid.className = "pvsc-color-grid";
-  for (const presetColor of PRESET_COLORS) {
-    const swatch = document.createElement("button");
-    swatch.type = "button";
-    swatch.className = "pvsc-color-swatch";
+  panel.append(speedHead, rail);
+
+  const rule = document.createElement("hr");
+  rule.className = "pvsc-rule";
+  panel.appendChild(rule);
+
+  // ── Two-column region ──────────────────────────────────────────────────────
+  const cols = document.createElement("div");
+  cols.className = "pvsc-cols";
+
+  const subsCol = document.createElement("div");
+  subsCol.className = "pvsc-col";
+
+  const subsHead = document.createElement("div");
+  subsHead.className = "pvsc-head";
+  const subsEyebrow = document.createElement("span");
+  subsEyebrow.className = "pvsc-eyebrow";
+  subsEyebrow.textContent = "Subtitles";
+  const subtitleSwitch = makeButton("On", "pvsc-switch", () => setSubtitleEnabled(!subtitleEnabled));
+  subtitleSwitch.setAttribute("aria-label", "Toggle subtitle styling");
+  subsHead.append(subsEyebrow, subtitleSwitch);
+
+  const swatches = document.createElement("div");
+  swatches.className = "pvsc-swatches";
+  const swatchButtons = PRESET_COLORS.map((presetColor) => {
+    const swatch = makeButton("", "pvsc-swatch", () => setSubtitleColor(presetColor.hex));
     swatch.title = presetColor.name;
+    swatch.setAttribute("aria-label", presetColor.name);
     swatch.style.backgroundColor = presetColor.hex;
     swatch.setAttribute("data-color", presetColor.hex);
-    swatch.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setSubtitleColor(presetColor.hex);
-      showControls();
-    });
-    colorGrid.appendChild(swatch);
-  }
-  menu.appendChild(colorGrid);
+    swatches.appendChild(swatch);
+    return swatch;
+  });
 
-  // ── Subtitle size row: label + number input + % label ──────────────────────
   const sizeRow = document.createElement("div");
-  sizeRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;";
-
+  sizeRow.className = "pvsc-row";
   const sizeLabel = document.createElement("span");
+  sizeLabel.className = "pvsc-label";
   sizeLabel.textContent = "Size";
-  sizeLabel.style.cssText = "font-size:12px;color:rgba(255,255,255,0.7);flex-shrink:0;";
 
   const sizeInput = document.createElement("input");
-  sizeInput.id = "pvsc-size-input";
+  sizeInput.className = "pvsc-size-input";
   sizeInput.type = "number";
   sizeInput.min = "50";
   sizeInput.max = "400";
   sizeInput.step = "10";
   sizeInput.value = String(parseInt(subtitleSize, 10) || 150);
-  sizeInput.style.cssText = [
-    "flex:1",
-    "min-width:0",
-    "height:30px",
-    "padding:0 6px",
-    "background:rgba(255,255,255,0.09)",
-    "border:1px solid rgba(255,255,255,0.18)",
-    "border-radius:7px",
-    "color:#f7f7f8",
-    "font:inherit",
-    "font-size:13px",
-    "text-align:center",
-    "-moz-appearance:textfield",
-    "outline:none",
-  ].join(";");
-
-  const sizePct = document.createElement("span");
-  sizePct.textContent = "%";
-  sizePct.style.cssText = "font-size:12px;color:rgba(255,255,255,0.55);flex-shrink:0;";
-
-  // Commit on Enter or blur; let the input stay focused so user can keep typing
-  function commitSizeInput() {
-    setSubtitleSize(sizeInput.value);
-  }
-  sizeInput.addEventListener("change", commitSizeInput);
-  sizeInput.addEventListener("keydown", (e) => {
-    e.stopPropagation(); // prevent global hotkeys from firing while typing
-    if (e.key === "Enter") { commitSizeInput(); sizeInput.blur(); }
-    if (e.key === "Escape") { sizeInput.blur(); }
+  sizeInput.setAttribute("aria-label", "Subtitle size, percent");
+  sizeInput.addEventListener("change", () => setSubtitleSize(sizeInput.value));
+  sizeInput.addEventListener("keydown", (event) => {
+    event.stopPropagation(); // prevent global hotkeys from firing while typing
+    if (event.key === "Enter") { setSubtitleSize(sizeInput.value); sizeInput.blur(); }
+    if (event.key === "Escape") { sizeInput.blur(); }
   });
-  // Prevent pointerdown from closing menu
-  sizeInput.addEventListener("pointerdown", (e) => e.stopPropagation());
-  sizeInput.addEventListener("click", (e) => { e.stopPropagation(); sizeInput.select(); });
+  sizeInput.addEventListener("pointerdown", (event) => event.stopPropagation());
+  sizeInput.addEventListener("click", (event) => { event.stopPropagation(); sizeInput.select(); });
 
-  sizeRow.appendChild(sizeLabel);
-  sizeRow.appendChild(sizeInput);
-  sizeRow.appendChild(sizePct);
-  menu.appendChild(sizeRow);
+  sizeRow.append(sizeLabel, sizeInput);
 
-  // ── Bg toggle button ─────────────────────────────────────────────────────────
-  const bgBtn = makeMenuButton("Bg: Shadow", "", () => cycleSubtitleBg());
-  bgBtn.id = "pvsc-btn-subbg";
-  bgBtn.style.cssText = "margin-top:4px;width:100%;";
-  menu.appendChild(bgBtn);
+  const bgRow = document.createElement("div");
+  bgRow.className = "pvsc-row";
+  const bgLabel = document.createElement("span");
+  bgLabel.className = "pvsc-label";
+  bgLabel.textContent = "Backdrop";
+  const bgButton = makeButton("Shadow", "pvsc-value-btn", () => cycleSubtitleBg());
+  bgButton.setAttribute("aria-label", "Cycle subtitle backdrop");
+  bgRow.append(bgLabel, bgButton);
 
-  const divider2 = document.createElement("div");
-  divider2.className = "pvsc-divider";
-  menu.appendChild(divider2);
+  subsCol.append(subsHead, swatches, sizeRow, bgRow);
 
-  // Skip-intro / next-episode was keyboard-only ("n"), i.e. unreachable on a
-  // phone. Same action, given a button.
-  menu.appendChild(makeMenuButton("⏭ Skip Intro / Next", "", () => clickSkipButtons()));
+  const actionsCol = document.createElement("div");
+  actionsCol.className = "pvsc-col";
+
+  const pitchRow = document.createElement("div");
+  pitchRow.className = "pvsc-row";
+  const pitchLabel = document.createElement("span");
+  pitchLabel.className = "pvsc-label";
+  pitchLabel.textContent = "Pitch";
+  const pitchSwitch = makeButton("On", "pvsc-switch", () => setPreservePitch(!preservePitch));
+  pitchSwitch.title = "Keep voices at natural pitch. Turning this off makes speed changes smoother.";
+  pitchSwitch.setAttribute("aria-label", "Toggle pitch correction");
+  pitchRow.append(pitchLabel, pitchSwitch);
+
+  // Skip was keyboard-only ("n"), i.e. unreachable on a phone. Same action,
+  // given a button.
+  const skipButton = makeButton("⏭ Skip intro", "pvsc-skip", () => clickSkipButtons());
 
   const statsRow = document.createElement("div");
-  statsRow.className = "pvsc-stats-row";
-  statsRow.id = "pvsc-stats-text";
-  menu.appendChild(statsRow);
+  statsRow.className = "pvsc-stats";
 
-  wrap.append(speedButton, menu);
+  actionsCol.append(pitchRow, skipButton, statsRow);
+  cols.append(subsCol, actionsCol);
+  panel.appendChild(cols);
+
+  wrap.append(launcher, panel);
   root.appendChild(wrap);
   document.documentElement.appendChild(root);
 
@@ -1646,9 +2211,21 @@
     setPosition(savedPosition.left, savedPosition.top, false);
   }
 
-  updateButtonDisplay();
+  // Whatever changes the panel's box — opening it, rotating the device, a
+  // breakpoint switch, content reflowing — is a reason to re-check whether it
+  // now covers the launcher. Watching the box itself catches all of them
+  // without having to enumerate the triggers.
+  let panelSizeObserver = null;
+  if (typeof ResizeObserver === "function") {
+    panelSizeObserver = new ResizeObserver(() => updateLauncherShift());
+    panelSizeObserver.observe(panel);
+  }
 
-  speedButton.addEventListener("pointerdown", (event) => {
+  syncUi();
+
+  // ── 9. Scheduler & lifecycle ───────────────────────────────────────────────
+
+  launcher.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) {
       return;
     }
@@ -1663,10 +2240,10 @@
     dragOffsetY = event.clientY - rect.top;
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
-    speedButton.setPointerCapture(event.pointerId);
+    launcher.setPointerCapture(event.pointerId);
   });
 
-  speedButton.addEventListener("pointermove", (event) => {
+  launcher.addEventListener("pointermove", (event) => {
     if (!isDragging) {
       return;
     }
@@ -1681,7 +2258,7 @@
     }
   });
 
-  speedButton.addEventListener("pointerup", (event) => {
+  launcher.addEventListener("pointerup", (event) => {
     if (!isDragging) {
       return;
     }
@@ -1690,7 +2267,7 @@
     event.stopPropagation();
     isDragging = false;
     try {
-      speedButton.releasePointerCapture(event.pointerId);
+      launcher.releasePointerCapture(event.pointerId);
     } catch {}
 
     if (dragStarted) {
@@ -1705,14 +2282,14 @@
 
   // Without this, a gesture the browser steals (scroll, multi-touch) leaves
   // isDragging stuck true, which permanently disables the auto-hide timer.
-  speedButton.addEventListener("pointercancel", (event) => {
+  launcher.addEventListener("pointercancel", (event) => {
     if (!isDragging) {
       return;
     }
 
     isDragging = false;
     try {
-      speedButton.releasePointerCapture(event.pointerId);
+      launcher.releasePointerCapture(event.pointerId);
     } catch {}
 
     if (dragStarted) {
@@ -1798,38 +2375,100 @@
     }
   }
 
-  window.addEventListener("resize", () => {
+  function handleViewportChange() {
+    isTouch = matchQuery(TOUCH_QUERY);
+    closeButtonCacheKey = "";
     reflowPosition();
     refresh();
-  }, { signal: lifecycleSignal });
+    scheduleUiSync();
+  }
+
+  window.addEventListener("resize", handleViewportChange, { signal: lifecycleSignal });
+
+  // The layout used to be decided once, at install. A phone that was rotated,
+  // or a desktop window that was resized across the breakpoint, kept whatever
+  // the script guessed on the first frame while the CSS had already switched.
+  const mediaWatchers = [TOUCH_QUERY, LANDSCAPE_QUERY].map((query) => {
+    try {
+      const list = window.matchMedia(query);
+      list.addEventListener("change", handleViewportChange);
+      return list;
+    } catch {
+      return null;
+    }
+  });
 
   for (const eventName of ["fullscreenchange", "webkitfullscreenchange"]) {
     document.addEventListener(eventName, () => {
       ensureRootAttached();
       reflowPosition();
+      applySubtitleStyles();
       showControls();
     }, { signal: lifecycleSignal });
   }
-  maintenanceTimer = window.setInterval(() => {
-    const video = findVideo();
-    applySpeed(video);
-    checkAndHandleAds(video);
-  }, 200);
-  refreshTimer = window.setInterval(refresh, 500);
 
-  updateActivePreset();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      flushPersist();
+      stopTick();
+    } else {
+      setTickRate(isAdCurrentlyActive ? TICK_AD_MS : TICK_IDLE_MS);
+    }
+  }, { signal: lifecycleSignal });
+
+  window.addEventListener("pagehide", flushPersist, { signal: lifecycleSignal });
+
+  // ── Tick ───────────────────────────────────────────────────────────────────
+
+  let tickTimer = 0;
+  let tickRate = 0;
+  let refreshCounter = 0;
+
+  function tick() {
+    const video = findVideo();
+    if (video) {
+      attachVideoListeners(video);
+      if (!isRateWriteUnsafe(video)) {
+        alignDefaultRate(video, targetRate());
+        writeRate(video, targetRate());
+      }
+    }
+    checkAndHandleAds(video);
+
+    // The heavier housekeeping (re-parenting, positioning, observer retarget)
+    // only needs to run occasionally, so it rides on every other second of the
+    // idle tick rather than owning a timer of its own.
+    refreshCounter += 1;
+    if (tickRate >= TICK_IDLE_MS || refreshCounter % 20 === 0) {
+      refresh();
+    }
+  }
+
+  function setTickRate(rate) {
+    if (tickTimer && tickRate === rate) return;
+    stopTick();
+    tickRate = rate;
+    tickTimer = window.setInterval(tick, rate);
+  }
+
+  function stopTick() {
+    if (tickTimer) window.clearInterval(tickTimer);
+    tickTimer = 0;
+  }
+
+  setTickRate(TICK_IDLE_MS);
+
   applySpeed();
   refresh();
 
   const controlApi = {
     installed: true,
-    version: "3.6.8",
+    version: VERSION,
     applySpeed,
     refresh,
     applySubtitleStyles,
     checkAndHandleAds,
     clickSkipButtons,
-    isMenuOpen: () => isMenuOpen,
     /**
      * Closes the menu if it is open. Returns whether it actually closed, so the
      * Android host can let the hardware Back button dismiss the menu first and
@@ -1843,19 +2482,28 @@
       return true;
     },
     destroy() {
-      window.clearInterval(maintenanceTimer);
-      window.clearInterval(refreshTimer);
+      stopTick();
       window.clearTimeout(hideTimer);
-      window.clearTimeout(mutationThrottleTimer);
+      window.clearTimeout(discoveryTimer);
+      for (const timer of adWatchTimers) window.clearTimeout(timer);
+      if (uiSyncHandle) window.cancelAnimationFrame(uiSyncHandle);
+      flushPersist();
       lifecycleController.abort();
+      for (const list of mediaWatchers) {
+        try { list?.removeEventListener("change", handleViewportChange); } catch {}
+      }
       subtitleObserver?.disconnect();
+      videoSizeObserver?.disconnect();
+      panelSizeObserver?.disconnect();
       detachVideoListeners(attachedVideo);
-      restoreInactiveSubtitleElements();
+      subtitleRootChanged();
+      clearCueStamps();
 
       if (attachedVideo && isAdCurrentlyActive) {
         attachedVideo.muted = wasMutedBeforeAd;
-        attachedVideo.playbackRate = speed;
-        attachedVideo.defaultPlaybackRate = speed;
+        isAdCurrentlyActive = false;
+        alignDefaultRate(attachedVideo, speed);
+        writeRate(attachedVideo, speed);
       }
       isAdCurrentlyActive = false;
       restoreHiddenVideos();
@@ -1864,6 +2512,9 @@
       document.getElementById(STYLE_ID)?.remove();
       document.getElementById(SUBTITLE_STYLE_ID)?.remove();
       document.getElementById(AD_SHIELD_STYLE_ID)?.remove();
+      for (const token of ["--pvsc-sub-color", "--pvsc-sub-size", "--pvsc-sub-bg", "--pvsc-sub-shadow", "--pvsc-sub-pad", "--pvsc-sub-radius"]) {
+        document.documentElement.style.removeProperty(token);
+      }
       if (window.__primeVideoSpeedControl === controlApi) {
         delete window.__primeVideoSpeedControl;
       }

@@ -7,7 +7,8 @@ var tests = new (string Name, Action Run)[]
     ("Injection script caching", TestInjectionScriptCaching),
     ("CDP response ID matching", TestCdpResponseIdMatching),
     ("Subtitle selector isolation", TestSubtitleSelectorIsolation),
-    ("Injection script version consistency", TestScriptVersionConsistency)
+    ("Injection script version consistency", TestScriptVersionConsistency),
+    ("Mobile asset matches root script", TestMobileAssetMatchesRootScript)
 };
 
 var failures = 0;
@@ -155,12 +156,55 @@ static void TestSubtitleSelectorIsolation()
     AssertTrue(script.Contains("btn.matches(AUTO_SKIP_SELECTOR)", StringComparison.Ordinal));
 }
 
+// The version lives in six files. Rather than adding a seventh literal here,
+// take the script's own value as the source of truth and require every other
+// copy to agree with it — browser-smoke.js had already drifted a release behind
+// without anything noticing, which silently disabled that whole test.
 static void TestScriptVersionConsistency()
 {
     var script = LoadEmbeddedScript();
+    var declared = System.Text.RegularExpressions.Regex.Match(script, "const VERSION = \"([^\"]+)\"");
+    AssertTrue(declared.Success);
+    var version = declared.Groups[1].Value;
+
+    AssertTrue(script.Contains("version: VERSION", StringComparison.Ordinal));
+
+    // Matched bare, not quoted: the payload is JSON and System.Text.Json's
+    // default encoder escapes the surrounding single quotes to '.
     var checkPayload = System.Text.Encoding.UTF8.GetString(CdpPayloads.CheckInstalledScript);
-    AssertTrue(script.Contains("version: \"3.6.8\"", StringComparison.Ordinal));
-    AssertTrue(checkPayload.Contains("3.6.8", StringComparison.Ordinal));
+    AssertTrue(checkPayload.Contains(version, StringComparison.Ordinal));
+
+    var root = FindRepositoryRoot();
+    AssertTrue(File.ReadAllText(Path.Combine(root, "PrimeVideoSpeedApp.csproj"))
+        .Contains($"<Version>{version}</Version>", StringComparison.Ordinal));
+    AssertTrue(File.ReadAllText(Path.Combine(root, "mobile", "pubspec.yaml"))
+        .Contains($"version: {version}+", StringComparison.Ordinal));
+    AssertTrue(File.ReadAllText(Path.Combine(root, "CHANGELOG.md"))
+        .Contains($"## {version} ", StringComparison.Ordinal));
+}
+
+// The Flutter app loads its own copy from assets/. Nothing enforced that the two
+// stayed in step, so a change made in one place could ship to only one platform.
+static void TestMobileAssetMatchesRootScript()
+{
+    var root = FindRepositoryRoot();
+    var desktop = File.ReadAllBytes(Path.Combine(root, "speed-control.js"));
+    var mobile = File.ReadAllBytes(Path.Combine(root, "mobile", "assets", "speed-control.js"));
+    AssertTrue(desktop.AsSpan().SequenceEqual(mobile));
+}
+
+static string FindRepositoryRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "PrimeVideoSpeedApp.csproj")))
+        {
+            return directory.FullName;
+        }
+        directory = directory.Parent;
+    }
+    throw new InvalidOperationException("Could not locate the repository root from the test output directory.");
 }
 
 static string LoadEmbeddedScript()

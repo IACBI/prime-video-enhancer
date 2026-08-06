@@ -2,6 +2,19 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
+## 3.7.0 — 2026-08-06
+
+- **Subtitles no longer flash white before taking your colour.** Styling was applied by JavaScript after each new line already existed, which is one frame too late by construction. Subtitle appearance is now described in a stylesheet, so a new line is drawn in your colour from its very first frame.
+- **Changing playback speed no longer stalls the picture.** The speed is written once, in the order that costs the audio pipeline least, and the storage write and panel redraw that used to run in the same step as the change have been moved out of it.
+- Added a Pitch control. Leave it on to keep voices sounding natural; turn it off for noticeably smoother speed changes. It is always off while the ad shield is running.
+- Subtitle size is now measured against the picture instead of the window, so it stays readable in landscape and no longer jumps when you enter or leave fullscreen. Previously the default rendered at around 10px on a phone held sideways.
+- **Rebuilt the control panel.** Three deliberate layouts — an anchored menu on desktop, a bottom sheet in portrait, and a two-column side sheet in landscape that fits without scrolling. Opening the panel in landscape used to bury the button that closes it.
+- The panel now follows rotation and window resizing instead of deciding its layout once at startup.
+- Much lighter on battery and CPU: a self-sustaining 20-per-second styling loop is gone, and the remaining background work runs once a second during playback, pauses when the app is in the background, and speeds up only while an ad is being skipped.
+- Android: camera, microphone, and location requests from web pages are now refused. Only the protected-media permission Prime Video needs for playback is granted.
+- Android: ad and telemetry blocking now covers the same hosts as the desktop app, which previously blocked around forty and Android two.
+- Fixed the live browser test, which had been pinned to an old version number and was failing before it reached any of its checks.
+
 ## 3.6.8 — 2026-08-05
 
 - **Android: fixed playback failing on every title.** The WebView denied the protected-media permission Prime Video needs to request a Widevine licence, so playback stopped with "Video Unavailable". Verified end to end on a physical device.
