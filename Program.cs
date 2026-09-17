@@ -21,7 +21,7 @@ Console.WriteLine("Prime Video will open in a dedicated Microsoft Edge app windo
 Console.WriteLine("The speed & subtitle control appears automatically when the video player is available.");
 Console.WriteLine("Zero-Visibility Ad Shield is active across network and player levels.");
 Console.WriteLine("Custom Prime Video icon applied to application window and taskbar via AppUserModelID.");
-Console.WriteLine("Close this console window to stop the helper.");
+Console.WriteLine("Close this console window to stop the helper and the Prime Video window.");
 
 StartEdge(edgePath);
 
@@ -145,18 +145,28 @@ static void StartEdge(string edgePath)
     AppIconHelper.EnsureAppIconLoaded();
     var iconPath = AppIconHelper.GetOrCreateIconPath();
 
-    var arguments = string.Join(
+    // Flags every launch of the dedicated profile shares.
+    var browserArguments = string.Join(
         " ",
-        $"--remote-debugging-port={RemoteDebuggingPort}",
-        "--remote-debugging-address=127.0.0.1",
         $"--user-data-dir=\"{profileDir}\"",
         "--no-first-run",
         "--new-window",
         "--app-id=\"PrimeVideoSpeedController.App\"",
         $"--app=\"{PrimeVideoUrl}\"");
 
+    // The DevTools endpoint is unauthenticated and every process on the machine
+    // can reach loopback, so it may exist only while this helper is alive to use
+    // it. The debugging flags therefore live on the direct spawn below and never
+    // in a persisted shortcut: a shortcut carrying them would silently re-arm the
+    // endpoint on the signed-in profile on every future click, with no helper.
+    var arguments = string.Join(
+        " ",
+        $"--remote-debugging-port={RemoteDebuggingPort}",
+        "--remote-debugging-address=127.0.0.1",
+        browserArguments);
+
     var shortcutPath = Path.Combine(profileDir, "PrimeVideoSpeedController.lnk");
-    CreateShortcut(shortcutPath, edgePath, arguments, iconPath);
+    CreateShortcut(shortcutPath, edgePath, browserArguments, iconPath);
 
     try
     {
@@ -164,28 +174,34 @@ static void StartEdge(string edgePath)
         if (!string.IsNullOrEmpty(startMenuPrograms) && Directory.Exists(startMenuPrograms))
         {
             var startMenuLnk = Path.Combine(startMenuPrograms, "Prime Video Enhancer.lnk");
-            CreateShortcut(startMenuLnk, edgePath, arguments, iconPath);
+
+            // Point the Start Menu entry at the helper so relaunching starts the
+            // whole app. Rewriting it on every run also disarms the debug-flag
+            // shortcut older versions installed.
+            var helperPath = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(helperPath))
+            {
+                CreateShortcut(startMenuLnk, helperPath, string.Empty, iconPath);
+            }
+            else
+            {
+                CreateShortcut(startMenuLnk, edgePath, browserArguments, iconPath);
+            }
         }
     }
     catch { }
 
-    try
+    // Spawn Edge directly rather than through the .lnk: shell-executing a
+    // shortcut returns no usable process handle, so the browser could not be
+    // bound to the helper's lifetime (and the window could not be identified).
+    AppIconHelper.EdgeProcess = Process.Start(new ProcessStartInfo
     {
-        AppIconHelper.EdgeProcess = Process.Start(new ProcessStartInfo
-        {
-            FileName = shortcutPath,
-            UseShellExecute = true
-        });
-    }
-    catch
-    {
-        AppIconHelper.EdgeProcess = Process.Start(new ProcessStartInfo
-        {
-            FileName = edgePath,
-            Arguments = arguments,
-            UseShellExecute = false
-        });
-    }
+        FileName = edgePath,
+        Arguments = arguments,
+        UseShellExecute = false
+    });
+
+    BrowserLifetime.BindToHelper(AppIconHelper.EdgeProcess);
 }
 
 static async Task<List<DebugTarget>> GetTargets(HttpClient httpClient)
@@ -486,10 +502,21 @@ internal sealed class InjectionScriptCache
         this.embeddedScriptLoader = embeddedScriptLoader;
     }
 
+    // Assembly.Location is empty in a single-file bundle, which is how every
+    // release ships. Such a build never lays a speed-control.js beside the exe,
+    // so a file found there was planted after download - and in a shared
+    // directory that is a one-file path to running arbitrary JavaScript inside
+    // the signed-in Prime Video session. Live reload stays on for source-tree
+    // builds, which is the only place it was ever useful.
+#pragma warning disable IL3000 // The empty-Location-in-a-single-file-bundle behaviour is exactly what is being detected here.
+    private static readonly bool IsSingleFileBundle =
+        string.IsNullOrEmpty(typeof(InjectionScriptCache).Assembly.Location);
+#pragma warning restore IL3000
+
     public string GetScript()
     {
         var scriptInfo = new FileInfo(scriptPath);
-        if (scriptInfo.Exists)
+        if (!IsSingleFileBundle && scriptInfo.Exists)
         {
             lock (syncRoot)
             {
@@ -805,8 +832,139 @@ internal static class AdBlocker
     }
 }
 
+/// <summary>
+/// Ties the dedicated browser to this helper's own lifetime.
+/// </summary>
+/// <remarks>
+/// The browser exposes an unauthenticated DevTools endpoint on loopback, which
+/// any process on the machine can drive - including processes of other OS users,
+/// against whom the profile directory on disk is ACL-protected but the port is
+/// not. Left to itself the browser outlives the helper (the documented shutdown
+/// is "close this console window"), so the endpoint would keep serving the
+/// signed-in profile with nothing left that needs it.
+///
+/// A job object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is used rather than an
+/// exit handler because the kernel closes the job handle however the helper
+/// dies - console close, Ctrl+C, task kill or crash - whereas managed exit
+/// handlers do not run reliably for all of those.
+/// </remarks>
+internal static class BrowserLifetime
+{
+    private const uint JobObjectExtendedLimitInformation = 9;
+    private const uint JobObjectLimitKillOnJobClose = 0x2000;
+
+    // Held for the process lifetime: closing this handle is what kills the browser.
+    private static nint jobHandle;
+
+    public static void BindToHelper(Process? browser)
+    {
+        if (browser is null || !OperatingSystem.IsWindows()) return;
+
+        try
+        {
+            if (jobHandle == nint.Zero)
+            {
+                jobHandle = CreateJob();
+            }
+
+            if (jobHandle != nint.Zero)
+            {
+                AssignProcessToJobObject(jobHandle, browser.Handle);
+            }
+        }
+        catch { }
+    }
+
+    private static nint CreateJob()
+    {
+        var handle = CreateJobObject(nint.Zero, null);
+        if (handle == nint.Zero) return nint.Zero;
+
+        var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+        info.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
+
+        var length = Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
+        var pointer = Marshal.AllocHGlobal(length);
+        try
+        {
+            Marshal.StructureToPtr(info, pointer, false);
+            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, pointer, (uint)length))
+            {
+                CloseHandle(handle);
+                return nint.Zero;
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pointer);
+        }
+
+        return handle;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateJobObject(nint lpJobAttributes, string? lpName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(nint hJob, uint infoClass, nint lpJobObjectInfo, uint cbJobObjectInfoLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(nint hJob, nint hProcess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint hObject);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public nuint MinimumWorkingSetSize;
+        public nuint MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public nuint Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public nuint ProcessMemoryLimit;
+        public nuint JobMemoryLimit;
+        public nuint PeakProcessMemoryUsed;
+        public nuint PeakJobMemoryUsed;
+    }
+}
+
 internal static class AppIconHelper
 {
+    // Absolute path, because CreateProcess resolves a bare name against the
+    // calling application's directory first: a powershell.exe dropped next to
+    // the exe would otherwise be launched instead of the system one.
+    private static readonly string WindowsPowerShellPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.System),
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe");
+
     const uint IMAGE_ICON = 1;
     const uint LR_LOADFROMFILE = 0x00000010;
     const uint LR_DEFAULTSIZE = 0x00000040;
@@ -948,7 +1106,7 @@ internal static class AppIconHelper
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "powershell.exe",
+                    FileName = WindowsPowerShellPath,
                     Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"(Get-AppxPackage *AmazonVideo* -ErrorAction SilentlyContinue).InstallLocation\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
@@ -1028,24 +1186,14 @@ internal static class AppIconHelper
         var localPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         if (File.Exists(localPath)) return localPath;
 
-        try
-        {
-            var psScript = Path.Combine(AppContext.BaseDirectory, "Assets", "generate-app-icon.ps1");
-            if (File.Exists(psScript))
-            {
-                var proc = Process.Start(new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{psScript}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                proc?.WaitForExit(3000);
-            }
-        }
-        catch { }
+        // A loose Assets\generate-app-icon.ps1 used to be executed here when the
+        // icon was missing. Released builds are single-file and never ship that
+        // script, so any copy sitting next to the exe was put there after
+        // download - in a shared directory, by anyone holding create-file rights.
+        // Running it handed that person code execution as whoever launched the
+        // app. The icon is generated at build time (see the csproj target) and
+        // falls back to the embedded resource below, so nothing is lost.
 
-        if (File.Exists(localPath)) return localPath;
 
         try
         {
@@ -1117,7 +1265,7 @@ internal static class AppIconHelper
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "powershell.exe",
+                    FileName = WindowsPowerShellPath,
                     Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId = {windowPid}').CommandLine\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,

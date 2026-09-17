@@ -22,13 +22,22 @@ Include:
 ### Desktop
 
 - The Windows helper launches Microsoft Edge with a dedicated user-data directory.
-- Its Chromium DevTools endpoint is bound to `127.0.0.1:9223`; it is not intended to be exposed on the network.
+- It drives that browser over a Chromium DevTools endpoint on `127.0.0.1:9223`. The endpoint is never reachable from the network, but **it has no authentication**, and Windows applies no per-user restriction to loopback connections. While the helper runs, any process on the same machine — including one belonging to a different Windows account — can connect to it and control the browser, which means reading the cookies of the signed-in Prime Video session. Treat a shared or multi-user machine accordingly.
+- The endpoint exists only for as long as the helper runs. The helper binds the browser to its own lifetime, so closing the helper closes the Prime Video window too, and the shortcuts it installs never carry the debugging flags.
 - Request filtering and controller injection run only in the Edge session started by the helper.
+- Released builds are single-file executables. They use the script and icon compiled into the executable and deliberately ignore a `speed-control.js` or `Assets\generate-app-icon.ps1` placed next to it, so putting the executable in a shared folder cannot turn those files into a way to run someone else's code.
 
 ### Mobile
 
 - The Flutter app applies request filtering only inside its embedded WebView.
 - It does not configure a device-wide proxy, VPN, root certificate, or HTTPS interception service.
+- Release APKs are signed with a stable release key. Before installing, check the download against `SHA256SUMS.txt` on the release page, and confirm the signing certificate matches earlier releases:
+
+  ```
+  apksigner verify --print-certs PrimeVideoSpeedApp-Mobile.apk
+  ```
+
+  Releases `v3.6.6` through `v3.7.0` were signed with throwaway debug keys and cannot be verified this way; installing a later, properly signed release over one of them requires uninstalling it first, which clears the app's stored session.
 
 ### Privacy boundaries
 
@@ -39,4 +48,4 @@ Include:
 
 ## Safe operation
 
-Keep your operating system, Microsoft Edge, Android System WebView, and project dependencies current. Use official release assets only, avoid exposing the desktop debugging port, and review code before running modified local builds.
+Keep your operating system, Microsoft Edge, Android System WebView, and project dependencies current. Use official release assets only, verify them as described above, and review code before running modified local builds. Close the helper when you are done watching, and be aware that on a shared computer anyone with their own account can reach the debugging endpoint while it runs.

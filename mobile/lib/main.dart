@@ -236,15 +236,32 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
     } catch (_) {}
   }
 
+  /// Whether the previous back press was already spent closing the enhancer
+  /// menu. Reset whenever a back press does anything else, and on navigation.
+  bool _lastBackClosedMenu = false;
+
   /// Android back: close the enhancer menu, then walk the WebView history,
   /// and only leave the app when neither applies.
+  ///
+  /// The menu verdict comes from `window.__primeVideoSpeedControl`, a plain
+  /// page-world global with no isolation available on this plugin's Android
+  /// path, so the displayed page can forge it: a hostile page that answers
+  /// "I closed my menu" to every press would swallow the back button forever
+  /// and leave no way out of it inside a WebView that has no address bar.
+  /// Honouring the verdict at most once in a row keeps the real behaviour
+  /// (first press closes the menu, second navigates) while capping the damage
+  /// a forged one can do at a single ignored press.
   Future<void> _handleBack() async {
     final controller = _controller;
     if (controller != null) {
       final closed = await controller.evaluateJavascript(
         source: 'window.__primeVideoSpeedControl?.closeMenu?.() === true',
       );
-      if (closed == true || closed == 'true') return;
+      if ((closed == true || closed == 'true') && !_lastBackClosedMenu) {
+        _lastBackClosedMenu = true;
+        return;
+      }
+      _lastBackClosedMenu = false;
 
       if (await controller.canGoBack()) {
         await controller.goBack();
@@ -369,6 +386,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         setState(() {
                           _isLoading = false;
                         });
+                        _lastBackClosedMenu = false;
                         await _ensureScriptInstalled(controller);
                       },
                       // Prime Video is a client-side router, so onLoadStop does
@@ -376,6 +394,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                       // title or the player. Without this the panel is missing
                       // on exactly the pages it exists for.
                       onUpdateVisitedHistory: (controller, url, isReload) {
+                        _lastBackClosedMenu = false;
                         _ensureScriptInstalled(controller);
                       },
                       onReceivedError: (controller, request, error) {

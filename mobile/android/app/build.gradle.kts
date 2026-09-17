@@ -30,11 +30,38 @@ android {
         versionName = flutter.versionName
     }
 
+    // Release signing material comes from the environment (CI secrets); the
+    // keystore is never committed. Android accepts an update only when the
+    // signing certificate matches the installed one, so a debug key - which the
+    // Android Gradle Plugin regenerates on every fresh machine - makes every
+    // release unable to update the one before it, and leaves users with nothing
+    // to verify a downloaded APK against. Published builds must use the stable
+    // key; the debug fallback below exists only for local `flutter run --release`.
+    val releaseKeystorePath = System.getenv("PVSC_RELEASE_KEYSTORE")
+        ?.takeIf { it.isNotBlank() && file(it).exists() }
+
+    signingConfigs {
+        if (releaseKeystorePath != null) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("PVSC_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PVSC_RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("PVSC_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseKeystorePath != null) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn(
+                    "PVSC: no release keystore configured - signing with the debug key. " +
+                        "This build must not be published."
+                )
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
