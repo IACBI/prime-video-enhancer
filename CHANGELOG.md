@@ -7,6 +7,10 @@ All notable user-facing changes are documented here. Version tags and GitHub Rel
 - **Desktop: the network ad blocker no longer switches itself off during quiet stretches.** After 30 seconds without an ad request it tore down its own connection to the tab and stayed off until the next check restarted it, so ads requested in that gap went through.
 - Updating the controller while Prime Video is open no longer risks leaving a second, unresponsive panel on the page.
 - The ads-blocked counter recovers from a corrupted saved value instead of showing "NaN".
+- **Desktop: closing the helper now closes the Prime Video window too**, and the browser's debugging endpoint exists only while the helper runs. Shortcuts no longer carry the debugging flags; the Start Menu entry now starts the helper, and the older shortcuts that re-armed the endpoint on every click are disarmed or removed on the next run.
+- Desktop release builds ignore a `speed-control.js` or `Assets\generate-app-icon.ps1` placed next to the executable, and system tools are started by absolute path.
+- **Android releases are signed with a stable release key** and published with `SHA256SUMS.txt`, so an update installs over the previous version and a download can be verified. See [SECURITY.md](SECURITY.md) for checking the certificate; moving from a debug-signed release (3.6.6–3.7.0) needs one uninstall.
+- Android: a page can no longer swallow the Back button by claiming to close a menu; it is honoured at most once per touch.
 - Android: the controller is no longer resent to the page on every in-app navigation when it is already installed, and release builds no longer copy Prime Video's web console output into the device log.
 
 ## 3.7.0 — 2026-08-06

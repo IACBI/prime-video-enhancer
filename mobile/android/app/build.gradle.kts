@@ -38,7 +38,14 @@ android {
     // to verify a downloaded APK against. Published builds must use the stable
     // key; the debug fallback below exists only for local `flutter run --release`.
     val releaseKeystorePath = System.getenv("PVSC_RELEASE_KEYSTORE")
-        ?.takeIf { it.isNotBlank() && file(it).exists() }
+        ?.takeIf { it.isNotBlank() }
+        ?.also {
+            // Asked for a release key but it is not there: fail rather than fall
+            // back to the debug key, which is the outcome this block exists to stop.
+            if (!file(it).exists()) {
+                throw GradleException("PVSC_RELEASE_KEYSTORE points to a missing file: $it")
+            }
+        }
 
     signingConfigs {
         if (releaseKeystorePath != null) {

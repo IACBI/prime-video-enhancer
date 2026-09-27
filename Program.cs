@@ -165,8 +165,14 @@ static void StartEdge(string edgePath)
         "--remote-debugging-address=127.0.0.1",
         browserArguments);
 
-    var shortcutPath = Path.Combine(profileDir, "PrimeVideoSpeedController.lnk");
-    CreateShortcut(shortcutPath, edgePath, browserArguments, iconPath);
+    // Older versions launched Edge through this shortcut and stored the debugging
+    // flags in it. Nothing launches it any more, so remove it rather than leave a
+    // way to open the profile that bypasses the helper.
+    try
+    {
+        File.Delete(Path.Combine(profileDir, "PrimeVideoSpeedController.lnk"));
+    }
+    catch { }
 
     try
     {
@@ -1193,7 +1199,6 @@ internal static class AppIconHelper
         // Running it handed that person code execution as whoever launched the
         // app. The icon is generated at build time (see the csproj target) and
         // falls back to the embedded resource below, so nothing is lost.
-
 
         try
         {

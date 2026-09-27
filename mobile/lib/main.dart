@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -154,11 +155,13 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   @override
   void initState() {
     super.initState();
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointerEvent);
     _loadJsAsset();
   }
 
   @override
   void dispose() {
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointerEvent);
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -237,8 +240,14 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   }
 
   /// Whether the previous back press was already spent closing the enhancer
-  /// menu. Reset whenever a back press does anything else, and on navigation.
+  /// menu. Reset whenever a back press does anything else, on navigation, and
+  /// on a real touch — reopening the menu takes one, and a page cannot forge
+  /// it, so the next back press closes the menu again as expected.
   bool _lastBackClosedMenu = false;
+
+  void _onPointerEvent(PointerEvent event) {
+    if (event is PointerDownEvent) _lastBackClosedMenu = false;
+  }
 
   /// Android back: close the enhancer menu, then walk the WebView history,
   /// and only leave the app when neither applies.
@@ -248,9 +257,9 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   /// path, so the displayed page can forge it: a hostile page that answers
   /// "I closed my menu" to every press would swallow the back button forever
   /// and leave no way out of it inside a WebView that has no address bar.
-  /// Honouring the verdict at most once in a row keeps the real behaviour
-  /// (first press closes the menu, second navigates) while capping the damage
-  /// a forged one can do at a single ignored press.
+  /// Honouring the verdict at most once per real touch keeps the real
+  /// behaviour (first press closes the menu, second navigates) while capping
+  /// the damage a forged one can do at a single ignored press.
   Future<void> _handleBack() async {
     final controller = _controller;
     if (controller != null) {
