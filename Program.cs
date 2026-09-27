@@ -287,48 +287,31 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
         while (socket.State == WebSocketState.Open)
         {
             using var messageStream = new MemoryStream();
-            WebSocketReceiveResult? result = null;
-            try
+            WebSocketReceiveResult result;
+            // A single CDP event can span multiple WebSocket frames (e.g. a
+            // Fetch.requestPaused event with large request headers). The previous
+            // implementation assumed one ReceiveAsync call always captured the
+            // full message and fed the (possibly truncated) bytes straight to
+            // JsonDocument.Parse; a truncated message threw, was swallowed by an
+            // empty catch, and the paused request was never resolved — it hung
+            // in the browser forever. Looping until EndOfMessage fixes this.
+            //
+            // No receive timeout: cancelling a ClientWebSocket receive aborts the
+            // socket. An idle timeout used to do exactly that after every quiet
+            // 30 seconds, so the interceptor tore itself down and ad requests went
+            // unintercepted until the next poll restarted it. Edge closes the
+            // socket when the tab goes away, which ends the loop on its own.
+            do
             {
-                // A single CDP event can span multiple WebSocket frames (e.g. a
-                // Fetch.requestPaused event with large request headers). The previous
-                // implementation assumed one ReceiveAsync call always captured the
-                // full message and fed the (possibly truncated) bytes straight to
-                // JsonDocument.Parse; a truncated message threw, was swallowed by an
-                // empty catch, and the paused request was never resolved — it hung
-                // in the browser forever. Looping until EndOfMessage fixes this.
-                do
+                result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+                if (result.MessageType == WebSocketMessageType.Close) break;
+                if (result.Count > 0)
                 {
-                    using var recvCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    result = await socket.ReceiveAsync(buffer, recvCts.Token);
-                    if (result.MessageType == WebSocketMessageType.Close) break;
-                    if (result.Count > 0)
-                    {
-                        messageStream.Write(buffer, 0, result.Count);
-                    }
-                } while (!result.EndOfMessage);
-            }
-            catch (OperationCanceledException)
-            {
-                // Receive timed out; send a ping to check the connection is still alive.
-                try
-                {
-                    var pingPayload = JsonSerializer.Serialize(new
-                    {
-                        id = nextId++,
-                        method = "Runtime.evaluate",
-                        @params = new { expression = "1", returnByValue = true }
-                    });
-                    await socket.SendAsync(Encoding.UTF8.GetBytes(pingPayload), WebSocketMessageType.Text, true, CancellationToken.None);
+                    messageStream.Write(buffer, 0, result.Count);
                 }
-                catch
-                {
-                    break;
-                }
-                continue;
-            }
+            } while (!result.EndOfMessage);
 
-            if (result is null || result.MessageType == WebSocketMessageType.Close) break;
+            if (result.MessageType == WebSocketMessageType.Close) break;
             if (result.MessageType != WebSocketMessageType.Text || messageStream.Length == 0) continue;
 
             var responseText = Encoding.UTF8.GetString(messageStream.GetBuffer(), 0, (int)messageStream.Length);
@@ -1114,15 +1097,16 @@ internal static class AppIconHelper
             return false;
         }
 
+        // 2. Must match Prime Video or Amazon in the title. Checked before opening a
+        // process handle: this runs every poll for every Chromium-family window.
+        if (!titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) && !titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
+            return false;
+
         try
         {
             using var proc = Process.GetProcessById((int)windowPid);
-            // 2. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
+            // 3. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
             if (!proc.ProcessName.Equals("msedge", StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            // 3. Must match Prime Video or Amazon in the title
-            if (!titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) && !titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
                 return false;
 
             if (DedicatedPidCache.TryGetValue(windowPid, out var isDedicated))
@@ -1174,7 +1158,7 @@ internal static class AppIconHelper
         if (appIconHandle == nint.Zero) return;
 
         var iconPath = GetOrCreateIconPath();
-        var exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+        var exePath = Environment.ProcessPath ?? "";
         var storeGuid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
         var pkeyAumid = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
         var pkeyIcon = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 3);

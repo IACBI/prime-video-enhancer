@@ -2,6 +2,13 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
+## Unreleased
+
+- **Desktop: the network ad blocker no longer switches itself off during quiet stretches.** After 30 seconds without an ad request it tore down its own connection to the tab and stayed off until the next check restarted it, so ads requested in that gap went through.
+- Updating the controller while Prime Video is open no longer risks leaving a second, unresponsive panel on the page.
+- The ads-blocked counter recovers from a corrupted saved value instead of showing "NaN".
+- Android: the controller is no longer resent to the page on every in-app navigation when it is already installed, and release builds no longer copy Prime Video's web console output into the device log.
+
 ## 3.7.0 — 2026-08-06
 
 - **Subtitles no longer flash white before taking your colour.** Styling was applied by JavaScript after each new line already existed, which is one frame too late by construction. Subtitle appearance is now described in a stylesheet, so a new line is drawn in your colour from its very first frame.

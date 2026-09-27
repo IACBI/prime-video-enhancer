@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -220,6 +221,14 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   Future<void> _ensureScriptInstalled(InAppWebViewController controller) async {
     if (_injectedJsCode == null || _injectedJsCode!.isEmpty) return;
     try {
+      // Probe first: the guard in the payload below only runs after the whole
+      // source has already crossed the bridge.
+      final live = await controller.evaluateJavascript(
+        source:
+            "window.__primeVideoSpeedControl?.version === '$_scriptVersion'",
+      );
+      if (live == true || live == 'true') return;
+      // Still guarded: onLoadStop and onUpdateVisitedHistory can race here.
       await controller.evaluateJavascript(
         source:
             "if (window.__primeVideoSpeedControl?.version !== '$_scriptVersion') { $_injectedJsCode }",
@@ -331,9 +340,14 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                           action: PermissionResponseAction.GRANT,
                         );
                       },
-                      onConsoleMessage: (controller, message) {
-                        debugPrint('[PVSC-Console] ${message.message}');
-                      },
+                      // debugPrint is not stripped from release builds, so
+                      // without the gate every console line from a signed-in
+                      // Prime Video page lands in logcat.
+                      onConsoleMessage: kDebugMode || _webViewDebug
+                          ? (controller, message) {
+                              debugPrint('[PVSC-Console] ${message.message}');
+                            }
+                          : null,
                       onLoadStart: (controller, url) {
                         setState(() {
                           _isLoading = true;
@@ -365,7 +379,9 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         _ensureScriptInstalled(controller);
                       },
                       onReceivedError: (controller, request, error) {
-                        if (!request.isForMainFrame!) return;
+                        // Nullable: not every platform reports it, and a
+                        // force-unwrap would throw inside the callback.
+                        if (request.isForMainFrame == false) return;
                         debugPrint('[PVSC-Mobile] Load error: ${error.description}');
                         // Otherwise the progress bar hangs at partial forever.
                         setState(() {

@@ -233,8 +233,9 @@
   let subtitleBg = readStored(SUBTITLE_BG_KEY) || "shadow"; // transparent, shadow, solid
   let preservePitch = readStored(PRESERVE_PITCH_KEY) !== "false";
 
-  let adsBlockedCount = parseInt(readStored(ADS_BLOCKED_KEY) || "0", 10);
-  let adsTimeSavedSecs = parseInt(readStored(ADS_SAVED_SEC_KEY) || "0", 10);
+  // A corrupt value would parse to NaN, and NaN absorbs every later increment.
+  let adsBlockedCount = parseInt(readStored(ADS_BLOCKED_KEY) || "0", 10) || 0;
+  let adsTimeSavedSecs = parseInt(readStored(ADS_SAVED_SEC_KEY) || "0", 10) || 0;
 
   /**
    * Batches localStorage writes.
@@ -426,6 +427,10 @@
   }
 
   function handleVideoEmptied() {
+    // Detached rather than just forgotten: if a different <video> is elected
+    // next, this one's `waiting`/`stalled` would otherwise keep driving the ad
+    // speed fallback for an element that is no longer the one playing.
+    detachVideoListeners(attachedVideo);
     attachedVideo = null;
     subtitleRootChanged();
   }
@@ -1156,14 +1161,13 @@
 
   let currentObservedContainer = null;
   let subtitleObserver = null;
-  let adCheckQueued = false;
+  let adCheckTimer = 0;
   let adWatchTimers = [];
 
   function scheduleAdCheck(delay = 60) {
-    if (adCheckQueued) return;
-    adCheckQueued = true;
-    window.setTimeout(() => {
-      adCheckQueued = false;
+    if (adCheckTimer) return;
+    adCheckTimer = window.setTimeout(() => {
+      adCheckTimer = 0;
       checkAndHandleAds();
     }, delay);
   }
@@ -2484,8 +2488,8 @@
     checkAndHandleAds(video);
 
     // The heavier housekeeping (re-parenting, positioning, observer retarget)
-    // only needs to run occasionally, so it rides on every other second of the
-    // idle tick rather than owning a timer of its own.
+    // only needs to run occasionally, so it rides on the tick rather than owning
+    // a timer of its own: every idle tick (1s), every 20th ad tick (2s).
     refreshCounter += 1;
     if (tickRate >= TICK_IDLE_MS || refreshCounter % 20 === 0) {
       refresh();
@@ -2533,6 +2537,9 @@
       stopTick();
       window.clearTimeout(hideTimer);
       window.clearTimeout(discoveryTimer);
+      // A check still pending after teardown can re-engage ad mode, which
+      // restarts the tick and re-attaches the removed panel.
+      window.clearTimeout(adCheckTimer);
       for (const timer of adWatchTimers) window.clearTimeout(timer);
       if (uiSyncHandle) window.cancelAnimationFrame(uiSyncHandle);
       flushPersist();
