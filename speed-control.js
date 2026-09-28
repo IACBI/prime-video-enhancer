@@ -817,8 +817,15 @@
       document.documentElement.appendChild(style);
     }
 
+    // refresh() reaches here every idle tick, and assigning textContent replaces
+    // the sheet and re-resolves style for the whole document even when the text
+    // is identical. Only write when the rules actually differ.
+    const writeRules = (css) => {
+      if (style.textContent !== css) style.textContent = css;
+    };
+
     if (!subtitleEnabled) {
-      style.textContent = "";
+      writeRules("");
       return;
     }
 
@@ -827,7 +834,7 @@
     // computed-value time, and the property then falls back to `inherit`
     // rather than to the previous cascade winner — i.e. silently to Amazon's
     // white. Never remove them.
-    style.textContent = `
+    writeRules(`
       [${SUB_ROOT_ATTR}] :is(span, p, div):not(#${ROOT_ID} *),
       [${SUB_CUE_ATTR}], [${SUB_CUE_ATTR}] :is(span, p, div),
       .atvwebplayersdk-subtitle-text, .atvwebplayersdk-subtitle-text :is(span, p, div),
@@ -866,7 +873,7 @@
         background-color: var(--pvsc-sub-bg, transparent) !important;
         text-shadow: var(--pvsc-sub-shadow, none) !important;
       }
-    `;
+    `);
   }
 
   /**
