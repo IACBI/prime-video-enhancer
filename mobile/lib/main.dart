@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'web_rules.dart';
+
 /// Set at build time (`--dart-define=PVSC_WEBVIEW_DEBUG=true`) to expose the
 /// WebView to `chrome://inspect`. Off by default: it makes the page contents of
 /// a signed-in Prime Video session readable by any app-debuggable tooling.
@@ -50,107 +52,11 @@ class PrimeVideoWebScreen extends StatefulWidget {
 class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   String? _injectedJsCode;
   String _scriptVersion = '';
+  String? _userAgent;
   InAppWebViewController? _controller;
   bool _isLoading = true;
   double _loadingProgress = 0;
   bool _isFullscreen = false;
-
-  /// Third-party ad and tracking domains, matched on the registrable suffix.
-  ///
-  /// Kept in step with `AdBlocker.Domains` in the desktop `Program.cs`. The two
-  /// lists had drifted badly — mobile knew about two hosts against the desktop's
-  /// forty — so an Android user was getting a small fraction of the blocking.
-  static const _adDomainSuffixes = [
-    'amazon-adsystem.com',
-    'doubleclick.net',
-    'googlesyndication.com',
-    'googleadservices.com',
-    'google-analytics.com',
-    'googletagmanager.com',
-    'googletagservices.com',
-    'fwmrm.net',
-    'flashtalking.com',
-    'innovid.com',
-    'scorecardresearch.com',
-    'moatads.com',
-    'serving-sys.com',
-    'adsrvr.org',
-    'adnxs.com',
-    'rubiconproject.com',
-    'pubmatic.com',
-    'openx.net',
-    'casalemedia.com',
-    'advertising.com',
-    'tapad.com',
-    'spotxchange.com',
-    'spotx.tv',
-    'springserve.com',
-    'tremorhub.com',
-    'yieldmo.com',
-    'ad-delivery.net',
-    'adtech.de',
-    'smartadserver.com',
-    'imrworldwide.com',
-    'quantserve.com',
-    'quantcount.com',
-  ];
-
-  /// First-party Amazon ad hosts. Prefix-matched because the regional edge
-  /// hosts vary (aan.amazon.com, aan.amazon.co.uk, mads-eu.amazon.com, …).
-  static const _adHostPrefixes = ['aan.amazon.', 'mads.amazon.', 'mads-'];
-
-  static const _telemetryHostPrefixes = [
-    'unagi',
-    'device-metrics',
-    'fls-na.',
-    'fls-eu.',
-    'fls-fe.',
-  ];
-
-  /// Path fragments that identify an ad or telemetry endpoint.
-  ///
-  /// Only applied on the first-party hosts below. A bare path match would also
-  /// hit a third-party video CDN whose segment or licence URLs happen to
-  /// contain something like `/interstitial` or `/csm/`, and failing one of
-  /// those stalls playback outright.
-  static const _adPathFragments = [
-    '/vast/',
-    '/vpaid/',
-    '/vast.xml',
-    '/ad-manifest',
-    '/interstitial',
-    '/aax2/',
-    '/e/dtb/',
-    '/api/ads/',
-  ];
-
-  static const _telemetryPathFragments = [
-    '/telemetry',
-    '/gp/uedata',
-    '/csm/',
-    '/api/2017/suggestions',
-  ];
-
-  static const _firstPartyHostSuffixes = [
-    'amazon.com',
-    'primevideo.com',
-    'media-amazon.com',
-    'a2z.com',
-    'amazon.co.uk',
-    'amazon.de',
-    'amazon.co.jp',
-    'amazon.in',
-    'amazon.com.br',
-    'amazon.com.mx',
-    'amazon.es',
-    'amazon.it',
-    'amazon.fr',
-    'amazon.ca',
-    'amazon.com.au',
-    'amazon.nl',
-    'amazon.se',
-    'amazon.com.tr',
-  ];
 
   @override
   void initState() {
@@ -167,13 +73,28 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
     super.dispose();
   }
 
+  /// Android only: iOS keeps WKWebView's own Safari agent. The old pinned string
+  /// was sent on iOS too, where claiming Android Chrome points Prime Video at
+  /// Widevine, which WKWebView does not have.
+  static Future<String?> _resolveUserAgent() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      return browserUserAgent(await InAppWebViewController.getDefaultUserAgent());
+    } catch (e) {
+      debugPrint('[PVSC-Mobile] Could not read the WebView user agent: $e');
+      return null;
+    }
+  }
+
   Future<void> _loadJsAsset() async {
+    final userAgent = _resolveUserAgent();
     String? js;
     try {
       js = await rootBundle.loadString('assets/speed-control.js');
     } catch (e) {
       debugPrint('[PVSC-Mobile] Error loading speed-control.js asset: $e');
     }
+    _userAgent = await userAgent;
     if (!mounted) return;
     // Read the version out of the script rather than repeating it here. It is
     // already duplicated across the csproj, the pubspec and the test suite, and
@@ -185,32 +106,10 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
     // `initialUserScripts` is only read once, when the platform view is
     // created. Building it earlier would permanently lose the
     // AT_DOCUMENT_START injection.
-    setState(() {
+    _update(() {
       _injectedJsCode = js ?? '';
       _scriptVersion = version ?? '';
     });
-  }
-
-  bool _isFirstParty(String host) =>
-      _firstPartyHostSuffixes.any((suffix) => host == suffix || host.endsWith('.$suffix'));
-
-  /// Ad endpoints, which expect a VAST document in reply.
-  ///
-  /// Host is checked before path: Prime Video's playback and licence traffic
-  /// goes to atv-ps.amazon.com and the CloudFront CDNs, so a bare substring
-  /// match over the whole URL risks blocking a path segment those share.
-  bool _isAdRequest(String host, String path) {
-    if (_adDomainSuffixes.any((suffix) => host == suffix || host.endsWith('.$suffix'))) {
-      return true;
-    }
-    if (_adHostPrefixes.any(host.startsWith)) return true;
-    return _isFirstParty(host) && _adPathFragments.any(path.contains);
-  }
-
-  /// Telemetry endpoints, which expect nothing in particular.
-  bool _isTelemetryRequest(String host, String path) {
-    if (_telemetryHostPrefixes.any(host.startsWith)) return true;
-    return _isFirstParty(host) && _telemetryPathFragments.any(path.contains);
   }
 
   /// Re-runs the userscript unless the current version is already live on the
@@ -245,6 +144,11 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   /// it, so the next back press closes the menu again as expected.
   bool _lastBackClosedMenu = false;
 
+  /// setState for platform callbacks, which can arrive after the screen is gone.
+  void _update(VoidCallback change) {
+    if (mounted) setState(change);
+  }
+
   void _onPointerEvent(PointerEvent event) {
     if (event is PointerDownEvent) _lastBackClosedMenu = false;
   }
@@ -263,19 +167,24 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
   Future<void> _handleBack() async {
     final controller = _controller;
     if (controller != null) {
-      final closed = await controller.evaluateJavascript(
-        source: 'window.__primeVideoSpeedControl?.closeMenu?.() === true',
-      );
-      if ((closed == true || closed == 'true') && !_lastBackClosedMenu) {
-        _lastBackClosedMenu = true;
-        return;
-      }
+      // A page mid-navigation can make these throw; Back must still do something.
+      try {
+        final closed = await controller.evaluateJavascript(
+          source: 'window.__primeVideoSpeedControl?.closeMenu?.() === true',
+        );
+        if ((closed == true || closed == 'true') && !_lastBackClosedMenu) {
+          _lastBackClosedMenu = true;
+          return;
+        }
+      } catch (_) {}
       _lastBackClosedMenu = false;
 
-      if (await controller.canGoBack()) {
-        await controller.goBack();
-        return;
-      }
+      try {
+        if (await controller.canGoBack()) {
+          await controller.goBack();
+          return;
+        }
+      } catch (_) {}
     }
 
     // This screen is the root route, so Navigator.pop would be a no-op.
@@ -334,8 +243,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         allowFileAccessFromFileURLs: false,
                         allowUniversalAccessFromFileURLs: false,
                         supportMultipleWindows: false,
-                        userAgent:
-                            'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                        userAgent: _userAgent,
                       ),
                       onWebViewCreated: (controller) {
                         _controller = controller;
@@ -375,7 +283,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                             }
                           : null,
                       onLoadStart: (controller, url) {
-                        setState(() {
+                        _update(() {
                           _isLoading = true;
                         });
                       },
@@ -387,12 +295,12 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                             value < 1.0) {
                           return;
                         }
-                        setState(() {
+                        _update(() {
                           _loadingProgress = value;
                         });
                       },
                       onLoadStop: (controller, url) async {
-                        setState(() {
+                        _update(() {
                           _isLoading = false;
                         });
                         _lastBackClosedMenu = false;
@@ -412,14 +320,14 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         if (request.isForMainFrame == false) return;
                         debugPrint('[PVSC-Mobile] Load error: ${error.description}');
                         // Otherwise the progress bar hangs at partial forever.
-                        setState(() {
+                        _update(() {
                           _isLoading = false;
                         });
                       },
                       shouldInterceptRequest: (controller, request) async {
                         final host = request.url.host.toLowerCase();
                         final path = request.url.path.toLowerCase();
-                        if (_isAdRequest(host, path)) {
+                        if (isAdRequest(host, path)) {
                           return WebResourceResponse(
                             contentType: 'application/xml',
                             contentEncoding: 'utf-8',
@@ -430,7 +338,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                             reasonPhrase: 'OK',
                           );
                         }
-                        if (_isTelemetryRequest(host, path)) {
+                        if (isTelemetryRequest(host, path)) {
                           // An empty 204 rather than the VAST body: a caller
                           // expecting JSON would throw on XML, and a fake
                           // success is harder for Amazon's player to recover
@@ -446,7 +354,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         return null;
                       },
                       onEnterFullscreen: (controller) {
-                        setState(() => _isFullscreen = true);
+                        _update(() => _isFullscreen = true);
                         SystemChrome.setEnabledSystemUIMode(
                             SystemUiMode.immersiveSticky);
                         SystemChrome.setPreferredOrientations([
@@ -455,7 +363,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         ]);
                       },
                       onExitFullscreen: (controller) {
-                        setState(() => _isFullscreen = false);
+                        _update(() => _isFullscreen = false);
                         SystemChrome.setEnabledSystemUIMode(
                             SystemUiMode.edgeToEdge);
                         SystemChrome.setPreferredOrientations(

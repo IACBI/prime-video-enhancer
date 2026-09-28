@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's only data is the WebView's, which includes the signed-in Prime
+     Video session's cookies. None of it may leave the device, whether through
+     cloud backup or a device-to-device transfer (Android 12+). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

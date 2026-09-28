@@ -30,6 +30,16 @@ android {
         versionName = flutter.versionName
     }
 
+    // The APK is downloaded from GitHub, not delivered by Play, so download size
+    // is what users feel. Uncompressed native libraries (the AGP default) made
+    // it ~44 MB; compressed it is about half, at the cost of extracting them
+    // once at install.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     // Release signing material comes from the environment (CI secrets); the
     // keystore is never committed. Android accepts an update only when the
     // signing certificate matches the installed one, so a debug key - which the
