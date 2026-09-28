@@ -80,7 +80,8 @@ On Android, tap the control to open the menu; the Back button closes the menu be
 There is no settings file. Everything you change in the menu is saved automatically in the app's own browser storage.
 
 - **Desktop data** lives in `%LOCALAPPDATA%\PrimeVideoSpeedController\`. Deleting that folder resets every preference and signs you out of the dedicated Edge profile.
-- **Debugging port:** the desktop app talks to Edge on `127.0.0.1:9223`. The port is fixed; if something else already uses it, the app cannot connect.
+- **Debugging port:** the desktop app talks to Edge on `127.0.0.1:9223`, or on a free port it picks (and prints) when another program holds 9223.
+- **`PVSC_DATA_DIR`:** set it to a folder to keep the browser profile and icon cache there instead. The Start Menu entry is then left alone, so the copy can run beside a normal installation.
 - **Mobile WebView inspection** is off in every build. Developers can enable it with `flutter run --dart-define=PVSC_WEBVIEW_DEBUG=true`.
 
 ### Contributing
@@ -177,7 +178,8 @@ Android'de menüyü açmak için kontrole dokunun; Geri tuşu önce menüyü kap
 Ayrı bir ayar dosyası yok. Menüde değiştirdiğiniz her şey uygulamanın kendi tarayıcı depolamasına otomatik kaydedilir.
 
 - **Masaüstü verileri** `%LOCALAPPDATA%\PrimeVideoSpeedController\` klasöründe durur. Bu klasörü silmek bütün tercihleri sıfırlar ve ayrılmış Edge profilindeki oturumunuzu kapatır.
-- **Hata ayıklama portu:** masaüstü uygulama Edge ile `127.0.0.1:9223` üzerinden konuşur. Port sabittir; başka bir program bu portu kullanıyorsa uygulama bağlanamaz.
+- **Hata ayıklama portu:** masaüstü uygulama Edge ile `127.0.0.1:9223` üzerinden konuşur; başka bir program 9223'ü tutuyorsa boş bir port seçer ve ekrana yazar.
+- **`PVSC_DATA_DIR`:** bir klasör adı verirseniz tarayıcı profili ve simge önbelleği orada tutulur. Başlat menüsü kısayoluna dokunulmaz; böylece kopya normal kurulumun yanında çalışabilir.
 - **Mobil WebView incelemesi** hiçbir derlemede açık değildir. Geliştiriciler `flutter run --dart-define=PVSC_WEBVIEW_DEBUG=true` ile açabilir.
 
 ### Katkı
