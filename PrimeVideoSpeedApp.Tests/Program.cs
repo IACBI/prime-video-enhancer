@@ -1,26 +1,44 @@
-var tests = new (string Name, Action Run)[]
+Func<Task> Sync(Action test) => () =>
 {
-    ("Prime Video target matching", TestPrimeVideoTargets),
-    ("DevTools URL must be the local endpoint", TestDebuggerUrlMustBeLocal),
-    ("Ad request classification", TestAdRequestClassification),
-    ("Safe block pattern deduplication", TestSafeBlockPatternDeduplication),
-    ("Every paused host pattern is classified", TestPausedPatternsAreClassified),
-    ("PROPVARIANT matches the native size", TestPropVariantSize),
-    ("Interceptor registration lifecycle", TestInterceptorRegistrationLifecycle),
-    ("Injection script caching", TestInjectionScriptCaching),
-    ("CDP response ID matching", TestCdpResponseIdMatching),
-    ("Subtitle selector isolation", TestSubtitleSelectorIsolation),
-    ("Injection script version consistency", TestScriptVersionConsistency),
-    ("Mobile asset matches root script", TestMobileAssetMatchesRootScript)
+    test();
+    return Task.CompletedTask;
+};
+
+var tests = new (string Name, Func<Task> Run)[]
+{
+    ("Prime Video target matching", Sync(TestPrimeVideoTargets)),
+    ("DevTools URL must be the local endpoint", Sync(TestDebuggerUrlMustBeLocal)),
+    ("Ad request classification", Sync(TestAdRequestClassification)),
+    ("Safe block pattern deduplication", Sync(TestSafeBlockPatternDeduplication)),
+    ("Every paused host pattern is classified", Sync(TestPausedPatternsAreClassified)),
+    ("PROPVARIANT matches the native size", Sync(TestPropVariantSize)),
+    ("Interceptor registration lifecycle", Sync(TestInterceptorRegistrationLifecycle)),
+    ("Injection script caching", Sync(TestInjectionScriptCaching)),
+    ("CDP response ID matching", Sync(TestCdpResponseIdMatching)),
+    ("Subtitle selector isolation", Sync(TestSubtitleSelectorIsolation)),
+    ("Injection script version consistency", Sync(TestScriptVersionConsistency)),
+    ("Mobile asset matches root script", Sync(TestMobileAssetMatchesRootScript)),
+    ("Debug port avoids busy ports", Sync(IntegrationTests.TestDebugPortAvoidsBusyPorts)),
+    // The rest drive a real headless browser and are skipped where none is installed.
+    ("Session injects the controller and follows navigation", IntegrationTests.TestSessionInjectsAndFollowsNavigation),
+    ("Session restores a wiped controller", IntegrationTests.TestSessionRestoresAWipedController),
+    ("Session answers ad requests", IntegrationTests.TestSessionAnswersAdRequests),
+    ("Watcher starts one session per matching tab", IntegrationTests.TestWatcherStartsOneSessionPerMatchingTab)
 };
 
 var failures = 0;
+var skipped = 0;
 foreach (var test in tests)
 {
     try
     {
-        test.Run();
+        await test.Run();
         Console.WriteLine($"PASS {test.Name}");
+    }
+    catch (SkipTestException skip)
+    {
+        skipped++;
+        Console.WriteLine($"SKIP {test.Name}: {skip.Message}");
     }
     catch (Exception ex)
     {
@@ -29,7 +47,9 @@ foreach (var test in tests)
     }
 }
 
-Console.WriteLine($"{tests.Length - failures}/{tests.Length} test groups passed.");
+await IntegrationTests.ShutDownAsync();
+
+Console.WriteLine($"{tests.Length - failures - skipped}/{tests.Length} test groups passed" + (skipped > 0 ? $", {skipped} skipped." : "."));
 return failures == 0 ? 0 : 1;
 
 static void TestPrimeVideoTargets()
@@ -228,7 +248,7 @@ static void TestScriptVersionConsistency()
 
     // Matched bare, not quoted: the payload is JSON and System.Text.Json's
     // default encoder escapes the surrounding single quotes to '.
-    var checkPayload = System.Text.Encoding.UTF8.GetString(CdpPayloads.CheckInstalledScript);
+    var checkPayload = System.Text.Encoding.UTF8.GetString(CdpPayloads.CheckInstalled(1));
     AssertTrue(checkPayload.Contains(version, StringComparison.Ordinal));
 
     var root = FindRepositoryRoot();

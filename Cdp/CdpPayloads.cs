@@ -6,30 +6,23 @@ internal static class CdpPayloads
     // causes needless reinjection or prevents a corrected script from loading.
     private const string ScriptVersion = "3.7.0";
 
-    public static readonly byte[] CheckInstalledScript = Serialize(new
+    // Answers two questions in one round trip: where is the tab now, and is the
+    // current controller still installed in it. It reads only; the controller's
+    // own timer keeps itself up to date, so nothing here needs to nudge it.
+    private const string CheckInstalledExpression =
+        "(() => { const control = window.__primeVideoSpeedControl; " +
+        "return JSON.stringify({ href: location.href, " +
+        "installed: !!(control && control.installed && control.version === '" + ScriptVersion + "') }); })()";
+
+    public static byte[] CheckInstalled(int id) => JsonSerializer.SerializeToUtf8Bytes(new
     {
-        id = 1,
+        id,
         method = "Runtime.evaluate",
         @params = new
         {
-            expression = $"(window.__primeVideoSpeedControl?.installed && window.__primeVideoSpeedControl?.version === '{ScriptVersion}' ? (window.__primeVideoSpeedControl.refresh(), window.__primeVideoSpeedControl.applySpeed(), window.__primeVideoSpeedControl.applySubtitleStyles(), window.__primeVideoSpeedControl.checkAndHandleAds?.(), 'already-installed') : null)",
+            expression = CheckInstalledExpression,
             awaitPromise = false,
             returnByValue = true
         }
     });
-
-    public static readonly byte[] EnableFetch = Serialize(new
-    {
-        id = 100,
-        method = "Fetch.enable",
-        @params = new
-        {
-            patterns = AdBlocker.Patterns
-                .Select(pattern => new { urlPattern = pattern, requestStage = "Request" })
-                .ToArray()
-        }
-    });
-
-    private static byte[] Serialize<T>(T payload) =>
-        JsonSerializer.SerializeToUtf8Bytes(payload);
 }

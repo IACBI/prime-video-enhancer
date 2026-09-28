@@ -125,6 +125,9 @@ internal static class AppIconHelper
     private static nint appIconHandle = nint.Zero;
     public static Process? EdgeProcess { get; set; }
 
+    /// <summary>The port the dedicated browser was asked to expose DevTools on.</summary>
+    public static int DebugPort { get; set; }
+
     private static bool ConvertPngToIco(string pngPath, string targetIcoPath)
     {
         try
@@ -220,7 +223,7 @@ internal static class AppIconHelper
     {
         try
         {
-            var cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrimeVideoSpeedController");
+            var cacheDir = AppPaths.DataRoot;
             Directory.CreateDirectory(cacheDir);
             var cachedIconPath = Path.Combine(cacheDir, "AppIcon.ico");
 
@@ -249,7 +252,7 @@ internal static class AppIconHelper
 
         try
         {
-            var cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrimeVideoSpeedController");
+            var cacheDir = AppPaths.DataRoot;
             Directory.CreateDirectory(cacheDir);
             var cachedIconPath = Path.Combine(cacheDir, "AppIcon.ico");
             if (!File.Exists(cachedIconPath))
@@ -327,7 +330,7 @@ internal static class AppIconHelper
                 {
                     var cmdLine = cmdProc.StandardOutput.ReadToEnd();
                     cmdProc.WaitForExit(1000);
-                    if (cmdLine.Contains("9223") || cmdLine.Contains("PrimeVideoSpeedController"))
+                    if (cmdLine.Contains($"--remote-debugging-port={DebugPort}", StringComparison.Ordinal) || cmdLine.Contains("PrimeVideoSpeedController"))
                     {
                         verified = true;
                     }

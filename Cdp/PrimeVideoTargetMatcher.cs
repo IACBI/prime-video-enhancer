@@ -6,10 +6,14 @@ internal static class PrimeVideoTargetMatcher
         "amazon.fr", "amazon.it", "amazon.es"
     };
 
-    public static bool IsMatch(DebugTarget target)
+    public static bool IsMatch(DebugTarget target) =>
+        string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase) &&
+        IsPrimeVideoUrl(target.Url);
+
+    /// <summary>Whether an address is a Prime Video page the controller may run on.</summary>
+    public static bool IsPrimeVideoUrl(string url)
     {
-        if (!string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase) ||
-            !Uri.TryCreate(target.Url, UriKind.Absolute, out var uri))
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             return false;
         }

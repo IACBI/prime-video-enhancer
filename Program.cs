@@ -1,11 +1,9 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
-const int RemoteDebuggingPort = 9223;
+const int PreferredDebugPort = 9223;
 const string PrimeVideoUrl = "https://www.primevideo.com/";
 const string ScriptFileName = "speed-control.js";
 
@@ -18,11 +16,16 @@ if (edgePath is null)
 
 // One helper per session. A second one (e.g. the Start Menu entry clicked while
 // the app is open) would inject into and intercept the same tabs as the first.
-using var singleInstance = new Mutex(true, @"Local\PrimeVideoSpeedController.Helper", out var isFirstInstance);
+// A copy pointed at its own data folder is a separate installation and gets its
+// own name, so it neither blocks nor is blocked by the normal one.
+var instanceName = AppPaths.IsCustomDataRoot
+    ? "." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(AppPaths.DataRoot.ToLowerInvariant())))[..16]
+    : "";
+using var singleInstance = new Mutex(true, @"Local\PrimeVideoSpeedController.Helper" + instanceName, out var isFirstInstance);
 if (!isFirstInstance)
 {
     Console.WriteLine("Prime Video Speed & Subtitle Controller is already running; opening another window.");
-    StartEdge(edgePath, openWindowOnly: true);
+    StartEdge(edgePath, debugPort: 0, openWindowOnly: true);
     return 0;
 }
 
@@ -33,41 +36,34 @@ Console.WriteLine("Zero-Visibility Ad Shield is active across network and player
 Console.WriteLine("Custom Prime Video icon applied to application window and taskbar via AppUserModelID.");
 Console.WriteLine("Close this console window to stop the helper and the Prime Video window.");
 
-StartEdge(edgePath);
+// The controller ships inside the executable; failing here, once, beats printing
+// the same error on every session that tries to inject it.
+var scriptCache = new InjectionScriptCache(
+    Path.Combine(AppContext.BaseDirectory, ScriptFileName),
+    LoadEmbeddedInjectionScript);
+_ = scriptCache.GetScript();
+
+var debugPort = DebugPort.Choose(PreferredDebugPort);
+if (debugPort != PreferredDebugPort)
+{
+    Console.WriteLine($"Port {PreferredDebugPort} is in use by another program; using port {debugPort} instead.");
+}
+
+StartEdge(edgePath, debugPort);
 
 // The debugging endpoint is loopback, but HttpClient and ClientWebSocket honour
 // HTTP_PROXY / the system proxy and would send it there - which fails outright
 // behind a proxy, or hands the DevTools traffic to the proxy.
 using var httpClient = new HttpClient(new SocketsHttpHandler { UseProxy = false });
-var scriptCache = new InjectionScriptCache(
-    Path.Combine(AppContext.BaseDirectory, ScriptFileName),
-    LoadEmbeddedInjectionScript);
+var watcher = new TargetWatcher(httpClient, debugPort, new TargetSessionOptions { Script = scriptCache.GetScript });
+var browserAnswered = false;
 
 while (true)
 {
     try
     {
-        var script = scriptCache.GetScript();
-        var targets = await GetTargets(httpClient);
-        var foundPrimeVideoTarget = false;
-        foreach (var target in targets)
-        {
-            if (PrimeVideoTargetMatcher.IsMatch(target) &&
-                PrimeVideoTargetMatcher.TryGetLocalDebuggerUrl(target, RemoteDebuggingPort) is { } debuggerUrl)
-            {
-                foundPrimeVideoTarget = true;
-                // Per target, so one tab that is navigating or hung does not skip
-                // the others for this poll.
-                try
-                {
-                    await InjectSpeedControl(debuggerUrl, script);
-                }
-                catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or HttpRequestException)
-                {
-                    // Prime Video can navigate while the script is being injected; the next poll retries.
-                }
-            }
-        }
+        var foundPrimeVideoTarget = await watcher.PollAsync();
+        browserAnswered = true;
 
         if (foundPrimeVideoTarget)
         {
@@ -86,6 +82,14 @@ while (true)
         // keeps a browser that relaunched itself (e.g. to apply an update) alive.
         if (AppIconHelper.EdgeProcess is { HasExited: true })
         {
+            if (!browserAnswered)
+            {
+                // Edge hands a profile that is already open to the running browser
+                // and exits at once; that browser was not started with our port.
+                Console.Error.WriteLine("Edge exited without opening its debugging port. It is probably already running for this profile (for example from an older version). Close its Prime Video window and start the helper again.");
+                return 1;
+            }
+
             return 0;
         }
     }
@@ -159,12 +163,9 @@ static void CreateShortcut(string shortcutPath, string targetPath, string argume
     catch { }
 }
 
-static void StartEdge(string edgePath, bool openWindowOnly = false)
+static void StartEdge(string edgePath, int debugPort, bool openWindowOnly = false)
 {
-    var profileDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PrimeVideoSpeedController",
-        "EdgeProfile");
+    var profileDir = AppPaths.EdgeProfile;
 
     Directory.CreateDirectory(profileDir);
 
@@ -195,7 +196,7 @@ static void StartEdge(string edgePath, bool openWindowOnly = false)
     // endpoint on the signed-in profile on every future click, with no helper.
     var arguments = string.Join(
         " ",
-        $"--remote-debugging-port={RemoteDebuggingPort}",
+        $"--remote-debugging-port={debugPort}",
         "--remote-debugging-address=127.0.0.1",
         browserArguments);
 
@@ -211,7 +212,7 @@ static void StartEdge(string edgePath, bool openWindowOnly = false)
     try
     {
         var startMenuPrograms = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
-        if (!string.IsNullOrEmpty(startMenuPrograms) && Directory.Exists(startMenuPrograms))
+        if (!AppPaths.IsCustomDataRoot && !string.IsNullOrEmpty(startMenuPrograms) && Directory.Exists(startMenuPrograms))
         {
             var startMenuLnk = Path.Combine(startMenuPrograms, "Prime Video Enhancer.lnk");
 
@@ -234,6 +235,7 @@ static void StartEdge(string edgePath, bool openWindowOnly = false)
     // Spawn Edge directly rather than through the .lnk: shell-executing a
     // shortcut returns no usable process handle, so the browser could not be
     // bound to the helper's lifetime (and the window could not be identified).
+    AppIconHelper.DebugPort = debugPort;
     AppIconHelper.EdgeProcess = Process.Start(new ProcessStartInfo
     {
         FileName = edgePath,
@@ -242,240 +244,4 @@ static void StartEdge(string edgePath, bool openWindowOnly = false)
     });
 
     BrowserLifetime.BindToHelper(AppIconHelper.EdgeProcess);
-}
-
-static async Task<List<DebugTarget>> GetTargets(HttpClient httpClient)
-{
-    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-    using var response = await httpClient.GetAsync($"http://127.0.0.1:{RemoteDebuggingPort}/json", cts.Token);
-    response.EnsureSuccessStatusCode();
-    using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
-    var targets = await JsonSerializer.DeserializeAsync<List<DebugTarget>>(stream, AppJson.Options, cts.Token);
-    return targets ?? [];
-}
-
-static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
-{
-    // Started first, and independently of injection succeeding: ad requests fired
-    // during the first page load would otherwise go through, and a tab whose
-    // injection keeps failing would never be protected at all.
-    if (InterceptorRegistry.TryRegister(webSocketDebuggerUrl))
-    {
-        _ = Task.Run(() => RunFetchInterceptorLoop(webSocketDebuggerUrl));
-    }
-
-    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-    using var socket = new ClientWebSocket();
-    socket.Options.Proxy = null;
-    await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), cts.Token);
-
-    // No request blocking on this short-lived socket. Network.setBlockedURLs used
-    // to be sent here, but it only holds while the session that set it stays
-    // attached - i.e. for the few milliseconds before this socket closes - so it
-    // blocked nothing. Fetch.enable here would be worse: an owner that never
-    // answers Fetch.requestPaused stalls the requests it paused. The persistent
-    // interceptor (RunFetchInterceptorLoop) is the single owner of blocking.
-
-    // --- Script injection (check if already installed with correct version) ---
-    await socket.SendAsync(CdpPayloads.CheckInstalledScript, WebSocketMessageType.Text, true, cts.Token);
-
-    var buffer = new byte[16384];
-    bool alreadyInstalled = false;
-    for (int i = 0; i < 10; i++)
-    {
-        var responseText = await CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, cts.Token);
-        if (responseText is null) break;
-        if (CdpResponseReader.IsResponseForId(responseText, 1))
-        {
-            alreadyInstalled = responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase);
-            break;
-        }
-    }
-
-    if (!alreadyInstalled)
-    {
-        var fullPayload = JsonSerializer.Serialize(new
-        {
-            id = 2,
-            method = "Runtime.evaluate",
-            @params = new
-            {
-                expression = script,
-                awaitPromise = false,
-                returnByValue = true
-            }
-        });
-
-        await socket.SendAsync(Encoding.UTF8.GetBytes(fullPayload), WebSocketMessageType.Text, true, cts.Token);
-        for (int i = 0; i < 10; i++)
-        {
-            var responseText = await CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, cts.Token);
-            if (responseText is null || CdpResponseReader.IsResponseForId(responseText, 2)) break;
-        }
-    }
-}
-
-static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
-{
-    try
-    {
-        using var socket = new ClientWebSocket();
-        socket.Options.Proxy = null;
-        using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), connectCts.Token);
-
-        // Re-enable Fetch on this persistent connection
-        // Only pause requests that match a known ad/telemetry pattern (AdBlocker.Patterns).
-        // Previously this used a catch-all "*" pattern, which paused every single
-        // network request on the page (video segments, manifests, images, scripts)
-        // and round-tripped each one through this .NET process before Chromium was
-        // allowed to proceed — a major source of playback stutter/latency. Narrowing
-        // the pattern list means non-ad requests never enter the Fetch domain at all
-        // and load at full speed.
-        await socket.SendAsync(CdpPayloads.EnableFetch, WebSocketMessageType.Text, true, CancellationToken.None);
-
-        var buffer = new byte[32768];
-        var nextId = 300;
-        while (socket.State == WebSocketState.Open)
-        {
-            using var messageStream = new MemoryStream();
-            WebSocketReceiveResult result;
-            // A single CDP event can span multiple WebSocket frames (e.g. a
-            // Fetch.requestPaused event with large request headers). The previous
-            // implementation assumed one ReceiveAsync call always captured the
-            // full message and fed the (possibly truncated) bytes straight to
-            // JsonDocument.Parse; a truncated message threw, was swallowed by an
-            // empty catch, and the paused request was never resolved — it hung
-            // in the browser forever. Looping until EndOfMessage fixes this.
-            //
-            // No receive timeout: cancelling a ClientWebSocket receive aborts the
-            // socket. An idle timeout used to do exactly that after every quiet
-            // 30 seconds, so the interceptor tore itself down and ad requests went
-            // unintercepted until the next poll restarted it. Edge closes the
-            // socket when the tab goes away, which ends the loop on its own.
-            do
-            {
-                result = await socket.ReceiveAsync(buffer, CancellationToken.None);
-                if (result.MessageType == WebSocketMessageType.Close) break;
-                if (result.Count > 0)
-                {
-                    messageStream.Write(buffer, 0, result.Count);
-                }
-            } while (!result.EndOfMessage);
-
-            if (result.MessageType == WebSocketMessageType.Close) break;
-            if (result.MessageType != WebSocketMessageType.Text || messageStream.Length == 0) continue;
-
-            var responseText = Encoding.UTF8.GetString(messageStream.GetBuffer(), 0, (int)messageStream.Length);
-
-            // Handle Fetch.requestPaused events
-            if (responseText.Contains("\"Fetch.requestPaused\"", StringComparison.OrdinalIgnoreCase))
-            {
-                string? pausedRequestId = null;
-                try
-                {
-                    using var doc = JsonDocument.Parse(responseText);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("params", out var paramsEl) &&
-                        paramsEl.TryGetProperty("requestId", out var requestIdEl))
-                    {
-                        var requestId = requestIdEl.GetString();
-                        if (string.IsNullOrEmpty(requestId)) continue;
-                        pausedRequestId = requestId;
-                        var requestUrl = "";
-                        if (paramsEl.TryGetProperty("request", out var requestEl) &&
-                            requestEl.TryGetProperty("url", out var urlEl))
-                        {
-                            requestUrl = urlEl.GetString() ?? "";
-                        }
-
-                        // A navigation is never an ad call, and failing one leaves the
-                        // user on a blocked-by-client error page.
-                        var isDocument = paramsEl.TryGetProperty("resourceType", out var typeEl) &&
-                            typeEl.ValueEquals("Document");
-                        var action = isDocument ? AdRequestAction.Continue : AdBlocker.ClassifyRequest(requestUrl);
-                        if (action == AdRequestAction.FulfillEmptyVast)
-                        {
-                            var emptyVast = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VAST version=\"3.0\"/>";
-                            var emptyVastBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(emptyVast));
-                            var fulfillPayload = JsonSerializer.Serialize(new
-                            {
-                                id = nextId++,
-                                method = "Fetch.fulfillRequest",
-                                @params = new
-                                {
-                                    requestId = requestId,
-                                    responseCode = 200,
-                                    responseHeaders = new[]
-                                    {
-                                        new { name = "Content-Type", value = "application/xml" },
-                                        new { name = "Access-Control-Allow-Origin", value = "*" }
-                                    },
-                                    body = emptyVastBase64
-                                }
-                            });
-                            await socket.SendAsync(Encoding.UTF8.GetBytes(fulfillPayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                            pausedRequestId = null;
-                        }
-                        else if (action == AdRequestAction.Block)
-                        {
-                            var failPayload = JsonSerializer.Serialize(new
-                            {
-                                id = nextId++,
-                                method = "Fetch.failRequest",
-                                @params = new
-                                {
-                                    requestId = requestId,
-                                    errorReason = "BlockedByClient"
-                                }
-                            });
-                            await socket.SendAsync(Encoding.UTF8.GetBytes(failPayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                            pausedRequestId = null;
-                        }
-                        else
-                        {
-                            // Allow non-ad requests to continue
-                            var continuePayload = JsonSerializer.Serialize(new
-                            {
-                                id = nextId++,
-                                method = "Fetch.continueRequest",
-                                @params = new { requestId = requestId }
-                            });
-                            await socket.SendAsync(Encoding.UTF8.GetBytes(continuePayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                            pausedRequestId = null;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Ad shield: failed to handle a network request event ({ex.GetType().Name}: {ex.Message}).");
-                    if (pausedRequestId is not null && socket.State == WebSocketState.Open)
-                    {
-                        try
-                        {
-                            var continuePayload = JsonSerializer.Serialize(new
-                            {
-                                id = nextId++,
-                                method = "Fetch.continueRequest",
-                                @params = new { requestId = pausedRequestId }
-                            });
-                            await socket.SendAsync(Encoding.UTF8.GetBytes(continuePayload), WebSocketMessageType.Text, true, CancellationToken.None);
-                        }
-                        catch (Exception continueEx)
-                        {
-                            Console.WriteLine($"Ad shield: could not release a paused request ({continueEx.GetType().Name}).");
-                        }
-                    }
-                }
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Ad shield: network interceptor for a Prime Video tab stopped ({ex.GetType().Name}: {ex.Message}). It will restart on the next poll.");
-    }
-    finally
-    {
-        InterceptorRegistry.Remove(webSocketDebuggerUrl);
-    }
 }
