@@ -16,6 +16,16 @@ if (edgePath is null)
     return 1;
 }
 
+// One helper per session. A second one (e.g. the Start Menu entry clicked while
+// the app is open) would inject into and intercept the same tabs as the first.
+using var singleInstance = new Mutex(true, @"Local\PrimeVideoSpeedController.Helper", out var isFirstInstance);
+if (!isFirstInstance)
+{
+    Console.WriteLine("Prime Video Speed & Subtitle Controller is already running; opening another window.");
+    StartEdge(edgePath, openWindowOnly: true);
+    return 0;
+}
+
 Console.WriteLine("Starting Prime Video Speed & Subtitle Controller...");
 Console.WriteLine("Prime Video will open in a dedicated Microsoft Edge app window.");
 Console.WriteLine("The speed & subtitle control appears automatically when the video player is available.");
@@ -25,7 +35,10 @@ Console.WriteLine("Close this console window to stop the helper and the Prime Vi
 
 StartEdge(edgePath);
 
-using var httpClient = new HttpClient();
+// The debugging endpoint is loopback, but HttpClient and ClientWebSocket honour
+// HTTP_PROXY / the system proxy and would send it there - which fails outright
+// behind a proxy, or hands the DevTools traffic to the proxy.
+using var httpClient = new HttpClient(new SocketsHttpHandler { UseProxy = false });
 var scriptCache = new InjectionScriptCache(
     Path.Combine(AppContext.BaseDirectory, ScriptFileName),
     LoadEmbeddedInjectionScript);
@@ -42,7 +55,16 @@ while (true)
             if (PrimeVideoTargetMatcher.IsMatch(target) && target.WebSocketDebuggerUrl is not null)
             {
                 foundPrimeVideoTarget = true;
-                await InjectSpeedControl(target.WebSocketDebuggerUrl, script);
+                // Per target, so one tab that is navigating or hung does not skip
+                // the others for this poll.
+                try
+                {
+                    await InjectSpeedControl(target.WebSocketDebuggerUrl, script);
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or HttpRequestException)
+                {
+                    // Prime Video can navigate while the script is being injected; the next poll retries.
+                }
             }
         }
 
@@ -53,15 +75,18 @@ while (true)
     }
     catch (OperationCanceledException)
     {
-        // Polling request or WebSocket operation timed out; retry on next tick.
+        // Polling request timed out; retry on next tick.
     }
     catch (HttpRequestException)
     {
-        // Edge can take a moment to expose the local debugging endpoint.
-    }
-    catch (WebSocketException)
-    {
-        // Prime Video can navigate while the script is being injected; the next poll retries.
+        // Edge takes a moment to expose the endpoint at startup. Once the browser
+        // we launched is gone and nothing answers, the user closed the window:
+        // stop instead of polling a dead port forever. Checking the endpoint too
+        // keeps a browser that relaunched itself (e.g. to apply an update) alive.
+        if (AppIconHelper.EdgeProcess is { HasExited: true })
+        {
+            return 0;
+        }
     }
     catch (Exception ex)
     {
@@ -133,7 +158,7 @@ static void CreateShortcut(string shortcutPath, string targetPath, string argume
     catch { }
 }
 
-static void StartEdge(string edgePath)
+static void StartEdge(string edgePath, bool openWindowOnly = false)
 {
     var profileDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -141,9 +166,6 @@ static void StartEdge(string edgePath)
         "EdgeProfile");
 
     Directory.CreateDirectory(profileDir);
-
-    AppIconHelper.EnsureAppIconLoaded();
-    var iconPath = AppIconHelper.GetOrCreateIconPath();
 
     // Flags every launch of the dedicated profile shares.
     var browserArguments = string.Join(
@@ -153,6 +175,17 @@ static void StartEdge(string edgePath)
         "--new-window",
         "--app-id=\"PrimeVideoSpeedController.App\"",
         $"--app=\"{PrimeVideoUrl}\"");
+
+    if (openWindowOnly)
+    {
+        // The profile is already open in a browser another helper owns; launching
+        // it again just asks that browser for a new window.
+        Process.Start(new ProcessStartInfo { FileName = edgePath, Arguments = browserArguments, UseShellExecute = false })?.Dispose();
+        return;
+    }
+
+    AppIconHelper.EnsureAppIconLoaded();
+    var iconPath = AppIconHelper.IconPath;
 
     // The DevTools endpoint is unauthenticated and every process on the machine
     // can reach loopback, so it may exist only while this helper is alive to use
@@ -222,22 +255,25 @@ static async Task<List<DebugTarget>> GetTargets(HttpClient httpClient)
 
 static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
 {
+    // Started first, and independently of injection succeeding: ad requests fired
+    // during the first page load would otherwise go through, and a tab whose
+    // injection keeps failing would never be protected at all.
+    if (InterceptorRegistry.TryRegister(webSocketDebuggerUrl))
+    {
+        _ = Task.Run(() => RunFetchInterceptorLoop(webSocketDebuggerUrl));
+    }
+
     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
     using var socket = new ClientWebSocket();
+    socket.Options.Proxy = null;
     await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), cts.Token);
 
-    // --- Layer 1: Network.setBlockedURLs (legacy, broad pattern matching) ---
-    await socket.SendAsync(CdpPayloads.EnableNetwork, WebSocketMessageType.Text, true, cts.Token);
-    await socket.SendAsync(CdpPayloads.SetBlockedUrls, WebSocketMessageType.Text, true, cts.Token);
-
-    // NOTE: Fetch-domain interception is intentionally NOT enabled on this short-lived
-    // socket. It used to be (a separate Fetch.enable call here), but that socket is
-    // disposed as soon as this method returns, without ever reading/answering
-    // Fetch.requestPaused events on this session. CDP's Fetch domain is not designed
-    // for multiple concurrent owners on the same target, so having this ephemeral
-    // socket "own" an interception it never services raced against the persistent
-    // interceptor below (RunFetchInterceptorLoop) and could stall matching requests.
-    // The persistent interceptor is the single owner of Fetch interception per target.
+    // No request blocking on this short-lived socket. Network.setBlockedURLs used
+    // to be sent here, but it only holds while the session that set it stays
+    // attached - i.e. for the few milliseconds before this socket closes - so it
+    // blocked nothing. Fetch.enable here would be worse: an owner that never
+    // answers Fetch.requestPaused stalls the requests it paused. The persistent
+    // interceptor (RunFetchInterceptorLoop) is the single owner of blocking.
 
     // --- Script injection (check if already installed with correct version) ---
     await socket.SendAsync(CdpPayloads.CheckInstalledScript, WebSocketMessageType.Text, true, cts.Token);
@@ -253,7 +289,6 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
             alreadyInstalled = responseText.Contains("\"already-installed\"", StringComparison.OrdinalIgnoreCase);
             break;
         }
-        if (cts.Token.IsCancellationRequested) break;
     }
 
     if (!alreadyInstalled)
@@ -275,14 +310,7 @@ static async Task InjectSpeedControl(string webSocketDebuggerUrl, string script)
         {
             var responseText = await CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, cts.Token);
             if (responseText is null || CdpResponseReader.IsResponseForId(responseText, 2)) break;
-            if (cts.Token.IsCancellationRequested) break;
         }
-    }
-
-    // --- Start persistent Fetch interceptor if not already active for this target ---
-    if (InterceptorRegistry.TryRegister(webSocketDebuggerUrl))
-    {
-        _ = Task.Run(() => RunFetchInterceptorLoop(webSocketDebuggerUrl));
     }
 }
 
@@ -291,6 +319,7 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
     try
     {
         using var socket = new ClientWebSocket();
+        socket.Options.Proxy = null;
         using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await socket.ConnectAsync(new Uri(webSocketDebuggerUrl), connectCts.Token);
 
@@ -359,7 +388,11 @@ static async Task RunFetchInterceptorLoop(string webSocketDebuggerUrl)
                             requestUrl = urlEl.GetString() ?? "";
                         }
 
-                        var action = AdBlocker.ClassifyRequest(requestUrl);
+                        // A navigation is never an ad call, and failing one leaves the
+                        // user on a blocked-by-client error page.
+                        var isDocument = paramsEl.TryGetProperty("resourceType", out var typeEl) &&
+                            typeEl.ValueEquals("Document");
+                        var action = isDocument ? AdRequestAction.Continue : AdBlocker.ClassifyRequest(requestUrl);
                         if (action == AdRequestAction.FulfillEmptyVast)
                         {
                             var emptyVast = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VAST version=\"3.0\"/>";
@@ -603,20 +636,6 @@ internal static class CdpPayloads
     // causes needless reinjection or prevents a corrected script from loading.
     private const string ScriptVersion = "3.7.0";
 
-    public static readonly byte[] EnableNetwork = Serialize(new
-    {
-        id = 10,
-        method = "Network.enable",
-        @params = new { }
-    });
-
-    public static readonly byte[] SetBlockedUrls = Serialize(new
-    {
-        id = 11,
-        method = "Network.setBlockedURLs",
-        @params = new { urls = AdBlocker.SafeBlockPatterns }
-    });
-
     public static readonly byte[] CheckInstalledScript = Serialize(new
     {
         id = 1,
@@ -654,13 +673,11 @@ internal enum AdRequestAction
 
 internal static class AdBlocker
 {
-    // Host-anchored ad/telemetry URL glob patterns. Every entry here names an ad
-    // or tracking host, so these are safe to hand to Network.setBlockedURLs,
-    // which hard-fails matching requests with no further inspection. Wildcards
-    // are broadened (e.g. "*aax-*.amazon-adsystem.com*") to cover regional edge
-    // hosts without needing a new entry per region, and to avoid the drift that
-    // previously existed between this list and a second, hand-maintained copy
-    // inlined in InjectSpeedControl.
+    // Host-anchored ad/telemetry URL glob patterns for Fetch.enable. Every entry
+    // names an ad or tracking host. Wildcards are broad (e.g. "*unagi*.amazon.com*"
+    // also matches unagi.amazon.com.tr) to cover regional edge hosts without a new
+    // entry per region; IsAdRequest must classify everything these pause, or the
+    // request is paused for nothing and continued.
     public static readonly string[] SafeBlockPatterns = new[]
     {
         "*amazon-adsystem.com*",
@@ -775,15 +792,22 @@ internal static class AdBlocker
         host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
         host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
 
+    // Amazon's retail domains in every region. The ad and telemetry hosts use the
+    // same first labels on all of them (unagi.amazon.com.tr, fls-eu.amazon.co.uk),
+    // and the Fetch globs pause those too.
+    static readonly string[] AmazonRetailDomains =
+        PathPatternHosts.Where(domain => domain.StartsWith("amazon.", StringComparison.Ordinal)).ToArray();
+
     static bool IsAmazonAdHost(string host)
     {
         if (HostMatches(host, "amazon-adsystem.com")) return true;
         if (host.Equals("aan.amazon.co", StringComparison.OrdinalIgnoreCase) ||
             host.StartsWith("aan.amazon.co.", StringComparison.OrdinalIgnoreCase)) return true;
-        if (!HostMatches(host, "amazon.com")) return false;
+        if (!AmazonRetailDomains.Any(domain => HostMatches(host, domain))) return false;
 
         var firstLabel = host.Split('.')[0];
-        return firstLabel.StartsWith("unagi", StringComparison.OrdinalIgnoreCase) ||
+        return firstLabel.Equals("aan", StringComparison.OrdinalIgnoreCase) ||
+            firstLabel.StartsWith("unagi", StringComparison.OrdinalIgnoreCase) ||
             firstLabel.StartsWith("fls-", StringComparison.OrdinalIgnoreCase) ||
             firstLabel.StartsWith("device-metrics", StringComparison.OrdinalIgnoreCase) ||
             firstLabel.StartsWith("mads", StringComparison.OrdinalIgnoreCase);
@@ -978,12 +1002,13 @@ internal static class AppIconHelper
     const nint ICON_SMALL = 0;
     const nint ICON_BIG = 1;
     const ushort VT_LPWSTR = 31;
+    const uint SMTO_ABORTIFHUNG = 0x0002;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern nint LoadImage(nint hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
 
     [DllImport("user32.dll", SetLastError = true)]
-    static extern nint SendMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
+    static extern nint SendMessageTimeout(nint hWnd, uint Msg, nint wParam, nint lParam, uint fuFlags, uint uTimeout, out nint lpdwResult);
 
     [DllImport("user32.dll")]
     static extern bool EnumWindows(EnumWindowsProc enumProc, nint lParam);
@@ -1025,6 +1050,10 @@ internal static class AppIconHelper
         public ushort wReserved2;
         public ushort wReserved3;
         public nint pwszVal;
+        // The native union is two pointers wide (24 bytes in total on x64, 16 on
+        // x86). Without this, PropVariantClear zeroes 8 bytes past the struct -
+        // i.e. whatever sits next to it on the stack.
+        public nint padding;
     }
 
     [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -1221,10 +1250,15 @@ internal static class AppIconHelper
         return localPath;
     }
 
+    private static string? resolvedIconPath;
+
+    /// <summary>The icon file, resolved once; resolving touches the file system and may extract files.</summary>
+    public static string IconPath => resolvedIconPath ??= GetOrCreateIconPath();
+
     public static void EnsureAppIconLoaded()
     {
         if (appIconHandle != nint.Zero) return;
-        var iconPath = GetOrCreateIconPath();
+        var iconPath = IconPath;
         if (File.Exists(iconPath))
         {
             appIconHandle = LoadImage(nint.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
@@ -1255,15 +1289,16 @@ internal static class AppIconHelper
         if (!titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) && !titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        // Only msedge pids are ever cached, so a hit needs no process handle.
+        if (DedicatedPidCache.TryGetValue(windowPid, out var isDedicated))
+            return isDedicated;
+
         try
         {
             using var proc = Process.GetProcessById((int)windowPid);
             // 3. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
             if (!proc.ProcessName.Equals("msedge", StringComparison.OrdinalIgnoreCase))
                 return false;
-
-            if (DedicatedPidCache.TryGetValue(windowPid, out var isDedicated))
-                return isDedicated;
 
             bool verified = false;
             try
@@ -1310,12 +1345,13 @@ internal static class AppIconHelper
         EnsureAppIconLoaded();
         if (appIconHandle == nint.Zero) return;
 
-        var iconPath = GetOrCreateIconPath();
+        var iconPath = IconPath;
         var exePath = Environment.ProcessPath ?? "";
         var storeGuid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
         var pkeyAumid = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
         var pkeyIcon = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 3);
         var pkeyCmd = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 2);
+        var pkeyDisplayName = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 4);
 
         EnumWindows((hWnd, lParam) =>
         {
@@ -1329,8 +1365,10 @@ internal static class AppIconHelper
 
                 if (IsOurDedicatedEdgeProcess(windowPid, titleStr))
                 {
-                    SendMessage(hWnd, WM_SETICON, ICON_SMALL, appIconHandle);
-                    SendMessage(hWnd, WM_SETICON, ICON_BIG, appIconHandle);
+                    // Bounded: a plain SendMessage to a hung Edge UI thread would
+                    // freeze the poll loop, and with it injection and ad blocking.
+                    SendMessageTimeout(hWnd, WM_SETICON, ICON_SMALL, appIconHandle, SMTO_ABORTIFHUNG, 500, out _);
+                    SendMessageTimeout(hWnd, WM_SETICON, ICON_BIG, appIconHandle, SMTO_ABORTIFHUNG, 500, out _);
 
                     try
                     {
@@ -1351,6 +1389,12 @@ internal static class AppIconHelper
                                     var pvCmd = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni(exePath) };
                                     propStore.SetValue(ref pkeyCmd, ref pvCmd);
                                     PropVariantClear(ref pvCmd);
+
+                                    // Windows ignores the relaunch command unless its
+                                    // display name is set alongside it.
+                                    var pvName = new PROPVARIANT { vt = VT_LPWSTR, pwszVal = Marshal.StringToCoTaskMemUni("Prime Video Enhancer") };
+                                    propStore.SetValue(ref pkeyDisplayName, ref pvName);
+                                    PropVariantClear(ref pvName);
                                 }
 
                                 propStore.Commit();

@@ -3,6 +3,8 @@ var tests = new (string Name, Action Run)[]
     ("Prime Video target matching", TestPrimeVideoTargets),
     ("Ad request classification", TestAdRequestClassification),
     ("Safe block pattern deduplication", TestSafeBlockPatternDeduplication),
+    ("Every paused host pattern is classified", TestPausedPatternsAreClassified),
+    ("PROPVARIANT matches the native size", TestPropVariantSize),
     ("Interceptor registration lifecycle", TestInterceptorRegistrationLifecycle),
     ("Injection script caching", TestInjectionScriptCaching),
     ("CDP response ID matching", TestCdpResponseIdMatching),
@@ -59,6 +61,13 @@ static void TestAdRequestClassification()
     AssertTrue(AdBlocker.IsAdRequest("https://completion.amazon.com/api/2017/suggestions?q=test"));
     AssertTrue(AdBlocker.IsAdRequest("https://m.media-amazon.com/images/G/01/csm/beacon"));
 
+    AssertTrue(AdBlocker.IsAdRequest("https://unagi.amazon.com.tr/1/events"));
+    AssertTrue(AdBlocker.IsAdRequest("https://aan.amazon.com.tr/request"));
+    AssertTrue(AdBlocker.IsAdRequest("https://fls-eu.amazon.co.uk/collect"));
+    AssertTrue(AdBlocker.IsAdRequest("https://mads-eu.amazon.de/serve"));
+
+    AssertFalse(AdBlocker.IsAdRequest("https://www.amazon.com.tr/gp/video/storefront"));
+    AssertFalse(AdBlocker.IsAdRequest("https://unagi.example.test/events"));
     AssertFalse(AdBlocker.IsAdRequest("https://example.test/interstitial/video-segment.ts"));
     AssertFalse(AdBlocker.IsAdRequest("https://notamazon.com/telemetry"));
     AssertFalse(AdBlocker.IsAdRequest("not-a-url"));
@@ -75,6 +84,28 @@ static void TestSafeBlockPatternDeduplication()
     AssertFalse(AdBlocker.SafeBlockPatterns.Contains("*amazon-adsystem.com/aax2/*"));
     AssertFalse(AdBlocker.SafeBlockPatterns.Contains("*amazon-adsystem.com/e/dtb/*"));
     AssertEqual(AdBlocker.SafeBlockPatterns.Length, AdBlocker.SafeBlockPatterns.Distinct().Count());
+}
+
+// Fetch pauses everything these globs match; a paused request that IsAdRequest
+// does not recognise is continued, i.e. paused for nothing and not blocked. The
+// .com.tr hosts slipped through exactly this way.
+static void TestPausedPatternsAreClassified()
+{
+    foreach (var pattern in AdBlocker.SafeBlockPatterns)
+    {
+        var sample = "https://" + pattern.Trim('*').Replace("*", "x");
+        if (sample.IndexOf('/', "https://".Length) < 0) sample += "/";
+        if (!AdBlocker.IsAdRequest(sample))
+        {
+            throw new InvalidOperationException($"'{pattern}' is paused but '{sample}' is not classified as an ad.");
+        }
+    }
+}
+
+static void TestPropVariantSize()
+{
+    var expected = IntPtr.Size == 8 ? 24 : 16;
+    AssertEqual(expected, System.Runtime.InteropServices.Marshal.SizeOf<AppIconHelper.PROPVARIANT>());
 }
 
 static void TestInterceptorRegistrationLifecycle()
