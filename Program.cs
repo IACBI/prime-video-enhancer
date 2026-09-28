@@ -52,14 +52,15 @@ while (true)
         var foundPrimeVideoTarget = false;
         foreach (var target in targets)
         {
-            if (PrimeVideoTargetMatcher.IsMatch(target) && target.WebSocketDebuggerUrl is not null)
+            if (PrimeVideoTargetMatcher.IsMatch(target) &&
+                PrimeVideoTargetMatcher.TryGetLocalDebuggerUrl(target, RemoteDebuggingPort) is { } debuggerUrl)
             {
                 foundPrimeVideoTarget = true;
                 // Per target, so one tab that is navigating or hung does not skip
                 // the others for this poll.
                 try
                 {
-                    await InjectSpeedControl(target.WebSocketDebuggerUrl, script);
+                    await InjectSpeedControl(debuggerUrl, script);
                 }
                 catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or HttpRequestException)
                 {
@@ -616,6 +617,19 @@ internal static class PrimeVideoTargetMatcher
         return isAmazonVideoPath && AmazonVideoHosts.Any(host => HostMatches(uri.Host, host));
     }
 
+    // The target list is fetched over an unauthenticated loopback port, so
+    // whatever answers there decides where the helper connects next. If some
+    // other local process holds the port, its list could name any WebSocket
+    // address and the helper would send the controller and the interception
+    // commands to it. Real Edge always names its own endpoint.
+    public static string? TryGetLocalDebuggerUrl(DebugTarget target, int port) =>
+        Uri.TryCreate(target.WebSocketDebuggerUrl, UriKind.Absolute, out var uri) &&
+        uri.Scheme == Uri.UriSchemeWs &&
+        uri.IsLoopback &&
+        uri.Port == port
+            ? target.WebSocketDebuggerUrl
+            : null;
+
     private static bool HostMatches(string host, string domain) =>
         host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
         host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
@@ -1142,7 +1156,7 @@ internal static class AppIconHelper
                 var psi = new ProcessStartInfo
                 {
                     FileName = WindowsPowerShellPath,
-                    Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"(Get-AppxPackage *AmazonVideo* -ErrorAction SilentlyContinue).InstallLocation\"",
+                    Arguments = "-NoProfile -Command \"(Get-AppxPackage *AmazonVideo* -ErrorAction SilentlyContinue).InstallLocation\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     CreateNoWindow = true
@@ -1272,33 +1286,26 @@ internal static class AppIconHelper
         if (EdgeProcess != null && !EdgeProcess.HasExited && windowPid == EdgeProcess.Id)
             return true;
 
-        // 1. Exclude windows whose title looks like an IDE / editor / tab search right away before opening Process handle
-        if (titleStr.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
-            titleStr.Contains("Visual Studio", StringComparison.OrdinalIgnoreCase) ||
-            titleStr.Contains("Cursor", StringComparison.OrdinalIgnoreCase) ||
-            titleStr.Contains(".cs", StringComparison.OrdinalIgnoreCase) ||
-            titleStr.Contains(".md", StringComparison.OrdinalIgnoreCase) ||
-            titleStr.Contains(".js", StringComparison.OrdinalIgnoreCase) ||
-            titleStr.Contains("Altyazı Öz", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // 2. Must match Prime Video or Amazon in the title. Checked before opening a
+        // 1. Must match Prime Video or Amazon in the title. Checked before opening a
         // process handle: this runs every poll for every Chromium-family window.
         if (!titleStr.Contains("Prime Video", StringComparison.OrdinalIgnoreCase) && !titleStr.Contains("Amazon", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Only msedge pids are ever cached, so a hit needs no process handle.
+        // Every pid that gets past the title check is cached, dedicated or not, so
+        // an editor or another Chromium app whose title happens to mention Prime
+        // Video costs one process lookup rather than one per poll.
         if (DedicatedPidCache.TryGetValue(windowPid, out var isDedicated))
             return isDedicated;
 
         try
         {
             using var proc = Process.GetProcessById((int)windowPid);
-            // 3. MUST be msedge.exe (excludes Antigravity IDE, VS Code, Cursor, Chrome, Electron apps, etc.)
+            // 2. MUST be msedge.exe (excludes VS Code, Chrome, Electron apps, etc.)
             if (!proc.ProcessName.Equals("msedge", StringComparison.OrdinalIgnoreCase))
+            {
+                DedicatedPidCache[windowPid] = false;
                 return false;
+            }
 
             bool verified = false;
             try
@@ -1306,7 +1313,7 @@ internal static class AppIconHelper
                 var psi = new ProcessStartInfo
                 {
                     FileName = WindowsPowerShellPath,
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId = {windowPid}').CommandLine\"",
+                    Arguments = $"-NoProfile -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId = {windowPid}').CommandLine\"",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     CreateNoWindow = true

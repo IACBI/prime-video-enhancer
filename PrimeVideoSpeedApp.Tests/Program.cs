@@ -1,6 +1,7 @@
 var tests = new (string Name, Action Run)[]
 {
     ("Prime Video target matching", TestPrimeVideoTargets),
+    ("DevTools URL must be the local endpoint", TestDebuggerUrlMustBeLocal),
     ("Ad request classification", TestAdRequestClassification),
     ("Safe block pattern deduplication", TestSafeBlockPatternDeduplication),
     ("Every paused host pattern is classified", TestPausedPatternsAreClassified),
@@ -44,6 +45,31 @@ static void TestPrimeVideoTargets()
     AssertFalse(IsTarget("page", "https://example.test/?next=https://primevideo.com/"));
     AssertFalse(IsTarget("page", "https://www.amazon.com/gp/videos-not-prime"));
     AssertFalse(IsTarget("page", "not-a-url"));
+}
+
+// Another process squatting on the debugging port could otherwise name any
+// WebSocket address in its target list and have the helper connect to it.
+static void TestDebuggerUrlMustBeLocal()
+{
+    const int port = 9223;
+    string? Resolve(string? url) =>
+        PrimeVideoTargetMatcher.TryGetLocalDebuggerUrl(new DebugTarget { WebSocketDebuggerUrl = url }, port);
+
+    const string real = "ws://127.0.0.1:9223/devtools/page/60108750D2DF8926B67C77127EF9BED8";
+    AssertEqual(real, Resolve(real));
+    AssertEqual("ws://localhost:9223/devtools/page/ABC", Resolve("ws://localhost:9223/devtools/page/ABC"));
+    AssertEqual("ws://[::1]:9223/devtools/page/ABC", Resolve("ws://[::1]:9223/devtools/page/ABC"));
+
+    AssertTrue(Resolve(null) is null);
+    AssertTrue(Resolve("") is null);
+    AssertTrue(Resolve("not-a-url") is null);
+    AssertTrue(Resolve("ws://evil.example:9223/devtools/page/ABC") is null);
+    AssertTrue(Resolve("ws://127.0.0.1.evil.example:9223/devtools/page/ABC") is null);
+    AssertTrue(Resolve("ws://192.168.1.5:9223/devtools/page/ABC") is null);
+    AssertTrue(Resolve("ws://127.0.0.1:9224/devtools/page/ABC") is null);
+    AssertTrue(Resolve("ws://127.0.0.1/devtools/page/ABC") is null);
+    AssertTrue(Resolve("wss://127.0.0.1:9223/devtools/page/ABC") is null);
+    AssertTrue(Resolve("http://127.0.0.1:9223/devtools/page/ABC") is null);
 }
 
 static void TestAdRequestClassification()
