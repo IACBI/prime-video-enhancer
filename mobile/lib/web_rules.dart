@@ -133,6 +133,30 @@ bool isTelemetryRequest(String host, String path) {
   return _isFirstParty(host) && _telemetryPathFragments.any(path.contains);
 }
 
+/// Hosts that make up Prime Video and Amazon's sign-in: `primevideo.com` and
+/// `amazon` under any country suffix (`amazon.com`, `amazon.de`, `amazon.co.uk`,
+/// `amazon.com.tr`, `amazon.ae`, ...). A pattern rather than a list, because a
+/// marketplace missing from a list would lock its customers out of signing in.
+final _amazonHost = RegExp(r'(^|\.)amazon\.(?:[a-z]{2,3}|com?\.[a-z]{2})$');
+
+/// Whether [host] (lower-case) is Prime Video or Amazon itself.
+bool isFirstPartyHost(String host) =>
+    _matchesSuffix(host, 'primevideo.com') || _amazonHost.hasMatch(host);
+
+/// Whether the WebView may load [uri] as the page it is showing.
+///
+/// The app has no address bar, so anything else that got loaded would be
+/// indistinguishable from Prime Video - and would receive the controller and be
+/// eligible for the DRM permission. Only Amazon and Prime Video pages qualify,
+/// plus `about:blank`; every other scheme (`intent:`, `market:`, `tel:`, ...) is
+/// refused. Plain `http` is allowed for those hosts because a redirect may pass
+/// through it on the way to `https`.
+bool isAllowedNavigation(Uri uri) {
+  if (uri.scheme == 'about') return uri.toString() == 'about:blank';
+  if (uri.scheme != 'https' && uri.scheme != 'http') return false;
+  return isFirstPartyHost(uri.host.toLowerCase());
+}
+
 /// Turns the Android WebView's own user agent into the plain Chrome one.
 ///
 /// The app used to pin a Chrome 120 string, which aged into a browser Prime

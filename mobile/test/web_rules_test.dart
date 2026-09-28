@@ -39,6 +39,48 @@ void main() {
     });
   });
 
+  group('isAllowedNavigation', () {
+    bool allowed(String url) => isAllowedNavigation(Uri.parse(url));
+
+    test('lets Prime Video and Amazon sign-in through', () {
+      expect(allowed('https://www.primevideo.com/'), isTrue);
+      expect(allowed('https://app.primevideo.com/detail/x'), isTrue);
+      expect(allowed('https://www.amazon.com/ap/signin'), isTrue);
+      expect(allowed('https://www.amazon.co.uk/ap/signin'), isTrue);
+      expect(allowed('https://www.amazon.com.tr/gp/video/storefront'), isTrue);
+      expect(allowed('https://www.amazon.com.au/'), isTrue);
+      expect(allowed('https://www.amazon.ae/'), isTrue);
+      expect(allowed('https://na.account.amazon.com/ap/mfa'), isTrue);
+      expect(allowed('http://www.amazon.com/'), isTrue);
+      expect(allowed('about:blank'), isTrue);
+    });
+
+    test('refuses everything else', () {
+      expect(allowed('https://example.com/'), isFalse);
+      expect(allowed('https://primevideo.com.evil.example/'), isFalse);
+      expect(allowed('https://amazon.com.evil.example/'), isFalse);
+      expect(allowed('https://notamazon.com/'), isFalse);
+      expect(allowed('https://amazon.evil.com/'), isFalse);
+      expect(allowed('https://www.amazon-adsystem.com/'), isFalse);
+      expect(allowed('https://evil.example/?next=https://www.primevideo.com/'), isFalse);
+      expect(allowed('http://evil.example/'), isFalse);
+      expect(allowed('intent://scan/#Intent;scheme=zxing;end'), isFalse);
+      expect(allowed('market://details?id=com.example'), isFalse);
+      expect(allowed('tel:+1234567'), isFalse);
+      expect(allowed('javascript:alert(1)'), isFalse);
+      expect(allowed('file:///sdcard/x.html'), isFalse);
+      expect(allowed('about:srcdoc'), isFalse);
+    });
+  });
+
+  test('isFirstPartyHost matches the hosts that may hold the DRM permission', () {
+    expect(isFirstPartyHost('www.primevideo.com'), isTrue);
+    expect(isFirstPartyHost('www.amazon.de'), isTrue);
+    expect(isFirstPartyHost('m.media-amazon.com'), isFalse);
+    expect(isFirstPartyHost('primevideo.com.example'), isFalse);
+    expect(isFirstPartyHost(''), isFalse);
+  });
+
   test('browserUserAgent strips only the WebView markers', () {
     const webView =
         'Mozilla/5.0 (Linux; Android 14; SM-A536B Build/UP1A.231005.007; wv) '

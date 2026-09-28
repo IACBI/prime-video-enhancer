@@ -226,6 +226,7 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         mediaPlaybackRequiresUserGesture: false,
                         allowsInlineMediaPlayback: true,
                         useShouldInterceptRequest: true,
+                        useShouldOverrideUrlLoading: true,
                         javaScriptEnabled: true,
                         domStorageEnabled: true,
                         databaseEnabled: true,
@@ -257,12 +258,18 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                       // wholesale, which meant any page reachable in the WebView
                       // could take the camera, the microphone or location without
                       // a prompt — the comment above justified the DRM case, but
-                      // the code never looked at what was being asked for.
+                      // the code never looked at what was being asked for. And only
+                      // to Amazon and Prime Video: the origin is checked too, so a
+                      // frame from anywhere else cannot ask for the device's DRM id.
                       onPermissionRequest: (controller, request) async {
-                        final granted = request.resources
-                            .where((resource) =>
-                                resource == PermissionResourceType.PROTECTED_MEDIA_ID)
-                            .toList();
+                        final granted = isFirstPartyHost(
+                                request.origin.host.toLowerCase())
+                            ? request.resources
+                                .where((resource) =>
+                                    resource ==
+                                    PermissionResourceType.PROTECTED_MEDIA_ID)
+                                .toList()
+                            : <PermissionResourceType>[];
                         if (granted.isEmpty) {
                           return PermissionResponse(
                             resources: request.resources,
@@ -352,6 +359,28 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                           );
                         }
                         return null;
+                      },
+                      // The app has no address bar, so a page from anywhere but
+                      // Amazon and Prime Video would look exactly like Prime Video
+                      // while holding the controller and the DRM permission. Say
+                      // so instead of failing silently: a sign-in that redirects
+                      // somewhere unexpected is otherwise a dead end.
+                      shouldOverrideUrlLoading: (controller, action) async {
+                        final url = action.request.url;
+                        if (url == null || isAllowedNavigation(url.uriValue)) {
+                          return NavigationActionPolicy.ALLOW;
+                        }
+                        debugPrint('[PVSC-Mobile] Blocked navigation to $url');
+                        if (mounted) {
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(SnackBar(
+                              content: Text(
+                                  'Blocked a link to ${url.host.isEmpty ? url.scheme : url.host}'),
+                              duration: const Duration(seconds: 3),
+                            ));
+                        }
+                        return NavigationActionPolicy.CANCEL;
                       },
                       onEnterFullscreen: (controller) {
                         _update(() => _isFullscreen = true);
