@@ -1,0 +1,70 @@
+name: CI
+
+# The release workflow only runs on a tag, i.e. after the code it would have
+# caught a problem in has already been tagged. This runs the same checks on every
+# push and pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: Desktop and controller
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      # The tests below use the global WebSocket, which Node ships enabled from 22.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Check controller syntax
+        run: node --check speed-control.js
+
+      - name: Run desktop tests
+        run: dotnet run --project PrimeVideoSpeedApp.Tests/PrimeVideoSpeedApp.Tests.csproj -c Release
+
+      # Runs the controller in the Edge that ships on the runner image.
+      - name: Run controller behaviour test
+        run: node PrimeVideoSpeedApp.Tests/controller-headless.js
+
+  mobile:
+    name: Android app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      # Same pin as the release workflow, so a green run here means the release
+      # job will resolve the same dependency set.
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: 'stable'
+          flutter-version: '3.47.1'
+          cache: true
+
+      - name: Analyze and test
+        working-directory: mobile
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze
+          flutter test
