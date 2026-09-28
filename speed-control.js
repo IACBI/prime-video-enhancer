@@ -1,4 +1,4 @@
-(() => {
+(function pvscBoot() {
   // ═══════════════════════════════════════════════════════════════════════════
   //  Prime Video Speed & Subtitle Controller
   //
@@ -13,6 +13,20 @@
   //    4. Settings           9. Scheduler & lifecycle
   //    5. Playback / ads
   // ═══════════════════════════════════════════════════════════════════════════
+
+  // A document-start injection (the Android host, or CDP's script-on-new-document)
+  // can run before the parser has created <html>, and every install step below
+  // appends to it. Wait for it rather than throwing and leaving the page without
+  // a controller until some later injection happens to succeed.
+  if (!document.documentElement) {
+    const waitForDocument = new MutationObserver(() => {
+      if (!document.documentElement) return;
+      waitForDocument.disconnect();
+      pvscBoot();
+    });
+    waitForDocument.observe(document, { childList: true });
+    return "deferred";
+  }
 
   // ── 1. Constants ───────────────────────────────────────────────────────────
 
@@ -33,6 +47,9 @@
   const PRESERVE_PITCH_KEY = "primeVideoSpeedControl.preservesPitch";
   const ADS_BLOCKED_KEY = "primeVideoSpeedControl.adsBlockedCount";
   const ADS_SAVED_SEC_KEY = "primeVideoSpeedControl.adsTimeSavedSecs";
+  const SPEED_SAVED_SEC_KEY = "primeVideoSpeedControl.speedTimeSavedSecs";
+  const AUTO_SKIP_KEY = "primeVideoSpeedControl.autoSkip";
+  const SUBTITLE_LIFT_KEY = "primeVideoSpeedControl.subtitleLift";
 
   // Marks the long-lived container Prime renders subtitles into. The stylesheet
   // targets its descendants, so a cue inserted later is styled during style
@@ -72,12 +89,18 @@
 
   const DEFAULT_SUBTITLE_COLOR = "#FFCC00";
   const PRESET_COLORS = [
-    { name: "Sarı", hex: "#FFCC00" },
-    { name: "Altın", hex: "#FFD700" },
-    { name: "Beyaz", hex: "#FFFFFF" },
-    { name: "Yeşil", hex: "#00FF66" },
-    { name: "Mavi", hex: "#00FFFF" },
+    { id: "yellow", hex: "#FFCC00" },
+    { id: "gold", hex: "#FFD700" },
+    { id: "white", hex: "#FFFFFF" },
+    { id: "green", hex: "#00FF66" },
+    { id: "cyan", hex: "#00FFFF" },
   ];
+
+  // How far captions can be raised, as a percentage of the picture's height.
+  const MAX_SUBTITLE_LIFT = 40;
+
+  // Sleep timer choices in minutes; 0 is "off".
+  const SLEEP_PRESETS_MIN = [0, 15, 30, 45, 60, 90];
 
   // Subtitle height as a fraction of the *video's* rendered height, at the 100%
   // setting. Roughly the CEA-708 / BBC guideline. Deliberately not vh: in
@@ -132,12 +155,25 @@
     "[data-testid*='next-episode' i]"
   ].join(", ");
 
-  const AD_SKIP_BUTTON_SELECTOR =
-    ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], div[class*='ad-skip' i]";
+  // Amazon's class names are English in every region, but the accessible labels
+  // follow the account language, so the label matches cover the languages Prime
+  // Video ships in.
+  const AD_SKIP_LABELS = [
+    "skip ad", "reklamı atla", "reklamı geç", "werbung überspringen", "passer la publicité",
+    "omitir anuncio", "saltar anuncio", "salta annuncio", "pular anúncio", "advertentie overslaan"
+  ];
+  const AD_SKIP_BUTTON_SELECTOR = [
+    ".atvwebplayersdk-ad-skip-button",
+    "[class*='adSkipButton' i]",
+    "[class*='ad-skip-button' i]",
+    ...AD_SKIP_LABELS.map((label) => `[aria-label*='${label}' i]`),
+    "div[class*='ad-skip' i]"
+  ].join(", ");
   // Generic "skip" controls. Only clicked while an ad is showing: outside one they
   // match ordinary player buttons such as "skip forward 10 seconds".
-  const GENERIC_SKIP_BUTTON_SELECTOR =
-    "button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i]";
+  const GENERIC_SKIP_BUTTON_SELECTOR = [
+    "skip", "atla", "überspringen", "passer", "omitir", "saltar", "salta", "pular", "overslaan"
+  ].map((word) => `button[title*='${word}' i]`).concat("[data-testid*='skip' i]").join(", ");
 
   // Note: .atvwebplayersdk-ad-resume-message is intentionally excluded here. It
   // appears once the ad break has ENDED and real content is resuming, so treating
@@ -201,6 +237,104 @@
   // reflow; the layout itself is the stylesheet's business.
   let isTouch = matchQuery(TOUCH_QUERY);
 
+  // ── Language ───────────────────────────────────────────────────────────────
+
+  // The panel follows the page's language where it has one, and reads English
+  // everywhere else. Only wording lives here; layout is the stylesheet's business.
+  const STRINGS = {
+    en: {
+      launcherTitle: "Playback speed and subtitle controls",
+      panelLabel: "Prime Video speed and subtitle controls",
+      speed: "Speed",
+      slower: "Slower",
+      faster: "Faster",
+      timesSpeed: (value) => `${value} times speed`,
+      subtitles: "Subtitles",
+      toggleSubtitles: "Toggle subtitle styling",
+      on: "On",
+      off: "Off",
+      size: "Size",
+      sizeLabel: "Subtitle size, percent",
+      backdrop: "Backdrop",
+      cycleBackdrop: "Cycle subtitle backdrop",
+      shadow: "Shadow",
+      solid: "Solid",
+      none: "None",
+      raise: "Raise",
+      raiseLabel: "Raise subtitles, percent of the picture height",
+      pitch: "Pitch",
+      pitchHint: "Keep voices at natural pitch. Turning this off makes speed changes smoother.",
+      togglePitch: "Toggle pitch correction",
+      autoSkip: "Auto-skip",
+      autoSkipHint: "Press Skip intro and Next episode for you when Prime offers them.",
+      toggleAutoSkip: "Toggle automatic skipping",
+      sleep: "Sleep",
+      sleepHint: "Pause playback after a set time.",
+      sleepLabel: "Sleep timer",
+      skipIntro: "⏭ Skip intro",
+      adsBlocked: (count, minutes, unit) => `${count} ads blocked · ${minutes}${unit} saved`,
+      speedSaved: (duration) => `${duration} saved by speed`,
+      units: { h: "h", m: "m", s: "s" },
+      colors: { yellow: "Yellow", gold: "Gold", white: "White", green: "Green", cyan: "Cyan" }
+    },
+    tr: {
+      launcherTitle: "Oynatma hızı ve altyazı kontrolleri",
+      panelLabel: "Prime Video hız ve altyazı kontrolleri",
+      speed: "Hız",
+      slower: "Yavaşlat",
+      faster: "Hızlandır",
+      timesSpeed: (value) => `${value} kat hız`,
+      subtitles: "Altyazı",
+      toggleSubtitles: "Altyazı stilini aç/kapat",
+      on: "Açık",
+      off: "Kapalı",
+      size: "Boyut",
+      sizeLabel: "Altyazı boyutu, yüzde",
+      backdrop: "Arka plan",
+      cycleBackdrop: "Altyazı arka planını değiştir",
+      shadow: "Gölge",
+      solid: "Dolgu",
+      none: "Yok",
+      raise: "Yükselt",
+      raiseLabel: "Altyazıyı yükselt, görüntü yüksekliğinin yüzdesi",
+      pitch: "Perde",
+      pitchHint: "Sesler doğal tonunda kalsın. Kapatmak hız değişimlerini daha akıcı yapar.",
+      togglePitch: "Perde düzeltmesini aç/kapat",
+      autoSkip: "Otomatik atla",
+      autoSkipHint: "Prime Girişi Atla / Sonraki Bölüm düğmesini gösterince sizin yerinize basar.",
+      toggleAutoSkip: "Otomatik atlamayı aç/kapat",
+      sleep: "Uyku",
+      sleepHint: "Belirli bir süre sonra oynatmayı duraklat.",
+      sleepLabel: "Uyku zamanlayıcısı",
+      skipIntro: "⏭ Girişi atla",
+      // Kept to one line at the panel's width; "saved" is carried by the line below.
+      adsBlocked: (count, minutes, unit) => `${count} reklam engellendi · ${minutes}${unit}`,
+      speedSaved: (duration) => `Hızla ${duration} kazanıldı`,
+      units: { h: "sa", m: "dk", s: "sn" },
+      colors: { yellow: "Sarı", gold: "Altın", white: "Beyaz", green: "Yeşil", cyan: "Turkuaz" }
+    }
+  };
+
+  function pickLanguage() {
+    try {
+      const tag = String(navigator.language || (navigator.languages && navigator.languages[0]) || "en");
+      return tag.toLowerCase().startsWith("tr") ? "tr" : "en";
+    } catch {
+      return "en";
+    }
+  }
+
+  const L = STRINGS[pickLanguage()];
+
+  /** Compact "2h 5m" style duration, in the panel's language. */
+  function formatDuration(totalSecs) {
+    const secs = Math.max(0, Math.floor(totalSecs));
+    if (secs < 60) return `${secs}${L.units.s}`;
+    const minutes = Math.floor(secs / 60);
+    if (minutes < 60) return `${minutes}${L.units.m}`;
+    return `${Math.floor(minutes / 60)}${L.units.h} ${minutes % 60}${L.units.m}`;
+  }
+
   const lifecycleController = new AbortController();
   const lifecycleSignal = lifecycleController.signal;
 
@@ -240,6 +374,18 @@
   // A corrupt value would parse to NaN, and NaN absorbs every later increment.
   let adsBlockedCount = parseInt(readStored(ADS_BLOCKED_KEY) || "0", 10) || 0;
   let adsTimeSavedSecs = parseInt(readStored(ADS_SAVED_SEC_KEY) || "0", 10) || 0;
+
+  // Time not spent watching because the picture played faster than real time.
+  // Kept fractional in memory and written out sparingly (see accountSpeedSavings).
+  let speedSavedSecs = Math.max(0, parseInt(readStored(SPEED_SAVED_SEC_KEY) || "0", 10) || 0);
+
+  let autoSkipEnabled = readStored(AUTO_SKIP_KEY) !== "false";
+
+  function clampLift(value) {
+    return Math.min(MAX_SUBTITLE_LIFT, Math.max(0, Math.round(Number(value) || 0)));
+  }
+
+  let subtitleLift = clampLift(parseInt(readStored(SUBTITLE_LIFT_KEY) || "0", 10));
 
   /**
    * Batches localStorage writes.
@@ -507,8 +653,101 @@
 
   function updateStatsDisplay() {
     if (statsRow) {
-      statsRow.textContent = `${adsBlockedCount} ads blocked · ${Math.floor(adsTimeSavedSecs / 60)}m saved`;
+      statsRow.textContent =
+        `${L.adsBlocked(adsBlockedCount, Math.floor(adsTimeSavedSecs / 60), L.units.m)}\n` +
+        L.speedSaved(formatDuration(speedSavedSecs));
     }
+  }
+
+  // ── Time saved by speed ────────────────────────────────────────────────────
+
+  let lastSavingsAt = 0;
+  let lastSavingsPersistAt = 0;
+
+  function persistSpeedSavings() {
+    persist(SPEED_SAVED_SEC_KEY, String(Math.floor(speedSavedSecs)));
+  }
+
+  /**
+   * Credits the time a faster-than-real-time picture saved since the last tick.
+   *
+   * Only real playback counts: a paused, seeking, buffering or ad-covered video
+   * would credit time nobody was watching, and a gap far longer than a tick (a
+   * suspended tab, a sleeping laptop) says nothing about what was played in it.
+   * Slower-than-normal playback is not netted off; the figure is "time saved",
+   * not "time difference".
+   */
+  function accountSpeedSavings(video) {
+    const now = Date.now();
+    const elapsed = lastSavingsAt ? now - lastSavingsAt : 0;
+    lastSavingsAt = now;
+
+    if (!video || elapsed <= 0 || elapsed > TICK_IDLE_MS * 3) return;
+    if (video.paused || video.ended || video.seeking || video.readyState < 3 || isAdCurrentlyActive) return;
+
+    const rate = video.playbackRate;
+    if (!(rate > 1)) return;
+
+    speedSavedSecs += (elapsed / 1000) * (1 - 1 / rate);
+
+    // localStorage writes are disk writes; once every 15 seconds of watching is
+    // plenty, and the unload paths flush whatever is still pending.
+    if (now - lastSavingsPersistAt > 15000) {
+      lastSavingsPersistAt = now;
+      persistSpeedSavings();
+    }
+  }
+
+  // ── Sleep timer ────────────────────────────────────────────────────────────
+
+  let sleepPreset = 0;
+  let sleepDeadline = 0;
+  let sleepTimer = 0;
+
+  function fireSleepTimer() {
+    sleepTimer = 0;
+    // An ad break is not the content the viewer asked to stop: wait it out, so the
+    // timer pauses the episode rather than the ad shield's hidden playback.
+    if (isAdCurrentlyActive) {
+      sleepTimer = window.setTimeout(fireSleepTimer, TICK_IDLE_MS);
+      return;
+    }
+    sleepPreset = 0;
+    sleepDeadline = 0;
+    for (const video of document.querySelectorAll("video")) {
+      try {
+        video.pause();
+      } catch {}
+    }
+    scheduleUiSync();
+    showControls();
+  }
+
+  /** Arms (or, with 0, cancels) the timer. Fractions of a minute are accepted. */
+  function setSleepTimer(minutes) {
+    window.clearTimeout(sleepTimer);
+    sleepTimer = 0;
+    sleepDeadline = 0;
+    const ms = Number(minutes) * 60000;
+    if (Number.isFinite(ms) && ms > 0) {
+      sleepDeadline = Date.now() + ms;
+      sleepTimer = window.setTimeout(fireSleepTimer, ms);
+    } else {
+      sleepPreset = 0;
+    }
+    scheduleUiSync();
+  }
+
+  function cycleSleepTimer() {
+    const index = SLEEP_PRESETS_MIN.indexOf(sleepPreset);
+    sleepPreset = SLEEP_PRESETS_MIN[(index + 1) % SLEEP_PRESETS_MIN.length];
+    setSleepTimer(sleepPreset);
+  }
+
+  function sleepLabel() {
+    if (!sleepDeadline) return L.off;
+    const minutes = Math.max(1, Math.ceil((sleepDeadline - Date.now()) / 60000));
+    return `${minutes}${L.units.m}`;
   }
 
   function incrementAdStats(count, secs) {
@@ -602,8 +841,15 @@
   // holding a static label or episode text) from engaging the shield on normal
   // content, which showed up to the user as a black screen with the episode
   // racing at ad speed underneath.
-  const COUNTDOWN_TEXT_RE = /(\d{1,2}:\d{2})|(\b\d{1,3}\s*(s|sn|sec|second|seconds|saniye)\b)/i;
-  const COUNTDOWN_ZERO_RE = /^0{1,2}:00$|^0\s*(s|sn|sec|second|seconds|saniye)$/i;
+  //
+  // A clock needs no translation. The seconds label does, so it lists the units
+  // of the languages Prime Video ships in. The boundaries are lookarounds on
+  // letters rather than \b, which only understands ASCII word characters.
+  const COUNTDOWN_UNITS =
+    "s|sn|sec|secs|second|seconds|saniye|sek|sekunde|sekunden|seg|segundo|segundos|seconde|secondes|secondi|сек|秒|초";
+  const COUNTDOWN_TEXT_RE = new RegExp(
+    `(\\d{1,2}:\\d{2})|((?<![\\p{L}\\d])\\d{1,3}\\s*(?:${COUNTDOWN_UNITS})(?![\\p{L}]))`, "iu");
+  const COUNTDOWN_ZERO_RE = new RegExp(`^0{1,2}:00$|^0\\s*(?:${COUNTDOWN_UNITS})\\.?$`, "iu");
 
   // Splits a class/testid string into words on hyphens/underscores/whitespace and
   // camelCase boundaries, so "ad" can be matched as a whole word. This is what
@@ -707,15 +953,18 @@
     ensureAdShieldStyle();
     if (!video) return;
 
-    // Auto-Skip feature
-    const autoSkipButtons = document.querySelectorAll(AUTO_SKIP_SELECTOR);
-    for (const btn of autoSkipButtons) {
-      if (!handledAutoSkipButtons.has(btn) && document.body.contains(btn) && isVisible(btn)) {
-        try {
-          btn.click();
-          handledAutoSkipButtons.add(btn);
-          console.log("[pvsc] Auto-skipped intro/outro!");
-        } catch {}
+    // Auto-Skip feature. Off means the buttons are left for the viewer, and the
+    // page is not scanned for them at all.
+    if (autoSkipEnabled) {
+      const autoSkipButtons = document.querySelectorAll(AUTO_SKIP_SELECTOR);
+      for (const btn of autoSkipButtons) {
+        if (!handledAutoSkipButtons.has(btn) && document.body.contains(btn) && isVisible(btn)) {
+          try {
+            btn.click();
+            handledAutoSkipButtons.add(btn);
+            console.log("[pvsc] Auto-skipped intro/outro!");
+          } catch {}
+        }
       }
     }
 
@@ -829,6 +1078,20 @@
       return;
     }
 
+    // Raising is opt-in, so at zero the sheet carries no positioning rule at all
+    // and Prime's own layout is untouched. It uses the standalone `translate`
+    // property, which composes with whatever `transform` the player positions
+    // captions with instead of replacing it, and it skips anything nested inside
+    // an element that is already raised so the offset is never applied twice.
+    const liftRule = subtitleLift > 0
+      ? `[${SUB_ROOT_ATTR}],
+      [${SUB_CUE_ATTR}]:not([${SUB_ROOT_ATTR}] *),
+      .atvwebplayersdk-subtitle-text:not([${SUB_ROOT_ATTR}] *, [${SUB_CUE_ATTR}] *),
+      .atvwebplayersdk-captions-text:not([${SUB_ROOT_ATTR}] *, [${SUB_CUE_ATTR}] *) {
+        translate: 0 calc(var(--pvsc-sub-lift, 0px) * -1) !important;
+      }`
+      : "";
+
     // The var() fallbacks are load-bearing, not defensive noise: a custom
     // property that is unset or invalid makes the declaration invalid at
     // computed-value time, and the property then falls back to `inherit`
@@ -873,6 +1136,7 @@
         background-color: var(--pvsc-sub-bg, transparent) !important;
         text-shadow: var(--pvsc-sub-shadow, none) !important;
       }
+      ${liftRule}
     `);
   }
 
@@ -947,6 +1211,7 @@
     style.setProperty("--pvsc-sub-shadow", shadow);
     style.setProperty("--pvsc-sub-pad", pad);
     style.setProperty("--pvsc-sub-radius", radius);
+    style.setProperty("--pvsc-sub-lift", `${Math.round(basis * (subtitleLift / 100))}px`);
   }
 
   /**
@@ -1325,6 +1590,25 @@
     scheduleUiSync();
   }
 
+  function setSubtitleLift(val) {
+    const pct = clampLift(val);
+    if (pct === subtitleLift) return;
+    subtitleLift = pct;
+    persist(SUBTITLE_LIFT_KEY, String(pct));
+    // The rule that positions captions only exists in the sheet while the lift is
+    // non-zero, so the sheet itself has to be rebuilt, not just the tokens.
+    ensureSubtitleStyle();
+    applySubtitleStyles();
+    scheduleUiSync();
+  }
+
+  function setAutoSkip(enabled) {
+    autoSkipEnabled = Boolean(enabled);
+    persist(AUTO_SKIP_KEY, String(autoSkipEnabled));
+    if (autoSkipEnabled) scheduleAdCheck();
+    scheduleUiSync();
+  }
+
   function cycleSubtitleBg() {
     if (subtitleBg === "shadow") subtitleBg = "solid";
     else if (subtitleBg === "solid") subtitleBg = "transparent";
@@ -1653,6 +1937,10 @@
         min-width: 0;
         padding: 0 8px;
       }
+      .pvsc-panel .pvsc-value-btn.pvsc-on {
+        color: var(--pvsc-live);
+        border-color: var(--pvsc-live);
+      }
 
       /* ── Actions ──────────────────────────────────────────────────────── */
       .pvsc-col {
@@ -1677,6 +1965,7 @@
         font-variant-numeric: tabular-nums;
         color: var(--pvsc-dim);
         text-align: center;
+        white-space: pre-line;
       }
 
       /* ══ Touch: bigger targets, panel becomes a sheet ══════════════════ */
@@ -1770,6 +2059,18 @@
       }
     }
     return clicked;
+  }
+
+  /** Typing in the panel must not reach the page's own hotkeys or tap handlers. */
+  function bindNumberInput(input, apply) {
+    input.addEventListener("change", () => apply(input.value));
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation(); // prevent global hotkeys from firing while typing
+      if (event.key === "Enter") { apply(input.value); input.blur(); }
+      if (event.key === "Escape") { input.blur(); }
+    });
+    input.addEventListener("pointerdown", (event) => event.stopPropagation());
+    input.addEventListener("click", (event) => { event.stopPropagation(); input.select(); });
   }
 
   function makeButton(text, className, onClick) {
@@ -2005,21 +2306,31 @@
     }
     updateRailMarker();
 
-    subtitleSwitch.textContent = subtitleEnabled ? "On" : "Off";
+    subtitleSwitch.textContent = subtitleEnabled ? L.on : L.off;
     subtitleSwitch.classList.toggle("pvsc-on", subtitleEnabled);
 
-    pitchSwitch.textContent = preservePitch ? "On" : "Off";
+    pitchSwitch.textContent = preservePitch ? L.on : L.off;
     pitchSwitch.classList.toggle("pvsc-on", preservePitch);
+
+    autoSkipSwitch.textContent = autoSkipEnabled ? L.on : L.off;
+    autoSkipSwitch.classList.toggle("pvsc-on", autoSkipEnabled);
+
+    sleepButton.textContent = sleepLabel();
+    sleepButton.classList.toggle("pvsc-on", sleepDeadline > 0);
+
+    if (liftInput.value !== String(subtitleLift) && document.activeElement !== liftInput) {
+      liftInput.value = String(subtitleLift);
+    }
 
     const pct = parseInt(subtitleSize, 10);
     if (Number.isFinite(pct) && sizeInput.value !== String(pct) && document.activeElement !== sizeInput) {
       sizeInput.value = String(pct);
     }
 
-    let bgLabel = "Shadow";
-    if (subtitleBg === "solid") bgLabel = "Solid";
-    else if (subtitleBg === "transparent") bgLabel = "None";
-    bgButton.textContent = bgLabel;
+    let backdropText = L.shadow;
+    if (subtitleBg === "solid") backdropText = L.solid;
+    else if (subtitleBg === "transparent") backdropText = L.none;
+    bgButton.textContent = backdropText;
 
     for (const swatch of swatchButtons) {
       const colorVal = swatch.getAttribute("data-color");
@@ -2147,7 +2458,7 @@
   const root = document.createElement("div");
   root.id = ROOT_ID;
   root.className = "pvsc-no-video";
-  root.setAttribute("aria-label", "Prime Video speed and subtitle controls");
+  root.setAttribute("aria-label", L.panelLabel);
 
   const wrap = document.createElement("div");
   wrap.className = "pvsc-wrap";
@@ -2155,7 +2466,7 @@
   const launcher = document.createElement("button");
   launcher.type = "button";
   launcher.className = "pvsc-launcher";
-  launcher.title = "Playback speed and subtitle controls";
+  launcher.title = L.launcherTitle;
   launcher.setAttribute("aria-haspopup", "true");
   const launcherValue = document.createElement("span");
   const launcherDot = document.createElement("span");
@@ -2171,7 +2482,7 @@
   speedHead.className = "pvsc-head";
   const speedEyebrow = document.createElement("span");
   speedEyebrow.className = "pvsc-eyebrow";
-  speedEyebrow.textContent = "Speed";
+  speedEyebrow.textContent = L.speed;
 
   const stepper = document.createElement("div");
   stepper.className = "pvsc-stepper";
@@ -2179,9 +2490,9 @@
   readout.className = "pvsc-readout";
   readout.setAttribute("aria-live", "polite");
   const stepDown = makeButton("−", "", () => setSpeed(speed - STEP));
-  stepDown.setAttribute("aria-label", "Slower");
+  stepDown.setAttribute("aria-label", L.slower);
   const stepUp = makeButton("+", "", () => setSpeed(speed + STEP));
-  stepUp.setAttribute("aria-label", "Faster");
+  stepUp.setAttribute("aria-label", L.faster);
   stepper.append(stepDown, readout, stepUp);
   speedHead.append(speedEyebrow, stepper);
 
@@ -2194,7 +2505,7 @@
   const stopButtons = PRESET_SPEEDS.map((preset) => {
     const stop = makeButton(formatStop(preset), "", () => setSpeed(preset));
     stop.setAttribute("data-speed", String(preset));
-    stop.setAttribute("aria-label", `${formatStop(preset)} times speed`);
+    stop.setAttribute("aria-label", L.timesSpeed(formatStop(preset)));
     rail.appendChild(stop);
     return stop;
   });
@@ -2216,17 +2527,17 @@
   subsHead.className = "pvsc-head";
   const subsEyebrow = document.createElement("span");
   subsEyebrow.className = "pvsc-eyebrow";
-  subsEyebrow.textContent = "Subtitles";
-  const subtitleSwitch = makeButton("On", "pvsc-switch", () => setSubtitleEnabled(!subtitleEnabled));
-  subtitleSwitch.setAttribute("aria-label", "Toggle subtitle styling");
+  subsEyebrow.textContent = L.subtitles;
+  const subtitleSwitch = makeButton(L.on, "pvsc-switch", () => setSubtitleEnabled(!subtitleEnabled));
+  subtitleSwitch.setAttribute("aria-label", L.toggleSubtitles);
   subsHead.append(subsEyebrow, subtitleSwitch);
 
   const swatches = document.createElement("div");
   swatches.className = "pvsc-swatches";
   const swatchButtons = PRESET_COLORS.map((presetColor) => {
     const swatch = makeButton("", "pvsc-swatch", () => setSubtitleColor(presetColor.hex));
-    swatch.title = presetColor.name;
-    swatch.setAttribute("aria-label", presetColor.name);
+    swatch.title = L.colors[presetColor.id];
+    swatch.setAttribute("aria-label", L.colors[presetColor.id]);
     swatch.style.backgroundColor = presetColor.hex;
     swatch.setAttribute("data-color", presetColor.hex);
     swatches.appendChild(swatch);
@@ -2237,7 +2548,7 @@
   sizeRow.className = "pvsc-row";
   const sizeLabel = document.createElement("span");
   sizeLabel.className = "pvsc-label";
-  sizeLabel.textContent = "Size";
+  sizeLabel.textContent = L.size;
 
   const sizeInput = document.createElement("input");
   sizeInput.className = "pvsc-size-input";
@@ -2246,15 +2557,8 @@
   sizeInput.max = "400";
   sizeInput.step = "10";
   sizeInput.value = String(parseInt(subtitleSize, 10) || 150);
-  sizeInput.setAttribute("aria-label", "Subtitle size, percent");
-  sizeInput.addEventListener("change", () => setSubtitleSize(sizeInput.value));
-  sizeInput.addEventListener("keydown", (event) => {
-    event.stopPropagation(); // prevent global hotkeys from firing while typing
-    if (event.key === "Enter") { setSubtitleSize(sizeInput.value); sizeInput.blur(); }
-    if (event.key === "Escape") { sizeInput.blur(); }
-  });
-  sizeInput.addEventListener("pointerdown", (event) => event.stopPropagation());
-  sizeInput.addEventListener("click", (event) => { event.stopPropagation(); sizeInput.select(); });
+  sizeInput.setAttribute("aria-label", L.sizeLabel);
+  bindNumberInput(sizeInput, setSubtitleSize);
 
   sizeRow.append(sizeLabel, sizeInput);
 
@@ -2262,10 +2566,26 @@
   bgRow.className = "pvsc-row";
   const bgLabel = document.createElement("span");
   bgLabel.className = "pvsc-label";
-  bgLabel.textContent = "Backdrop";
-  const bgButton = makeButton("Shadow", "pvsc-value-btn", () => cycleSubtitleBg());
-  bgButton.setAttribute("aria-label", "Cycle subtitle backdrop");
+  bgLabel.textContent = L.backdrop;
+  const bgButton = makeButton(L.shadow, "pvsc-value-btn", () => cycleSubtitleBg());
+  bgButton.setAttribute("aria-label", L.cycleBackdrop);
   bgRow.append(bgLabel, bgButton);
+
+  // Shares the size row: a row of its own costs a phone held sideways the
+  // vertical room it has least of.
+  const liftLabel = document.createElement("span");
+  liftLabel.className = "pvsc-label";
+  liftLabel.textContent = L.raise;
+  const liftInput = document.createElement("input");
+  liftInput.className = "pvsc-size-input";
+  liftInput.type = "number";
+  liftInput.min = "0";
+  liftInput.max = String(MAX_SUBTITLE_LIFT);
+  liftInput.step = "5";
+  liftInput.value = String(subtitleLift);
+  liftInput.setAttribute("aria-label", L.raiseLabel);
+  bindNumberInput(liftInput, setSubtitleLift);
+  sizeRow.append(liftLabel, liftInput);
 
   subsCol.append(subsHead, swatches, sizeRow, bgRow);
 
@@ -2276,20 +2596,40 @@
   pitchRow.className = "pvsc-row";
   const pitchLabel = document.createElement("span");
   pitchLabel.className = "pvsc-label";
-  pitchLabel.textContent = "Pitch";
-  const pitchSwitch = makeButton("On", "pvsc-switch", () => setPreservePitch(!preservePitch));
-  pitchSwitch.title = "Keep voices at natural pitch. Turning this off makes speed changes smoother.";
-  pitchSwitch.setAttribute("aria-label", "Toggle pitch correction");
+  pitchLabel.textContent = L.pitch;
+  const pitchSwitch = makeButton(L.on, "pvsc-switch", () => setPreservePitch(!preservePitch));
+  pitchSwitch.title = L.pitchHint;
+  pitchSwitch.setAttribute("aria-label", L.togglePitch);
   pitchRow.append(pitchLabel, pitchSwitch);
+
+  const autoSkipRow = document.createElement("div");
+  autoSkipRow.className = "pvsc-row";
+  const autoSkipLabel = document.createElement("span");
+  autoSkipLabel.className = "pvsc-label";
+  autoSkipLabel.textContent = L.autoSkip;
+  const autoSkipSwitch = makeButton(L.on, "pvsc-switch", () => setAutoSkip(!autoSkipEnabled));
+  autoSkipSwitch.title = L.autoSkipHint;
+  autoSkipSwitch.setAttribute("aria-label", L.toggleAutoSkip);
+  autoSkipRow.append(autoSkipLabel, autoSkipSwitch);
+
+  const sleepRow = document.createElement("div");
+  sleepRow.className = "pvsc-row";
+  const sleepRowLabel = document.createElement("span");
+  sleepRowLabel.className = "pvsc-label";
+  sleepRowLabel.textContent = L.sleep;
+  const sleepButton = makeButton(L.off, "pvsc-value-btn", () => cycleSleepTimer());
+  sleepButton.title = L.sleepHint;
+  sleepButton.setAttribute("aria-label", L.sleepLabel);
+  sleepRow.append(sleepRowLabel, sleepButton);
 
   // Skip was keyboard-only ("n"), i.e. unreachable on a phone. Same action,
   // given a button.
-  const skipButton = makeButton("⏭ Skip intro", "pvsc-skip", () => clickSkipButtons());
+  const skipButton = makeButton(L.skipIntro, "pvsc-skip", () => clickSkipButtons());
 
   const statsRow = document.createElement("div");
   statsRow.className = "pvsc-stats";
 
-  actionsCol.append(pitchRow, skipButton, statsRow);
+  actionsCol.append(pitchRow, autoSkipRow, sleepRow, skipButton, statsRow);
   cols.append(subsCol, actionsCol);
   panel.appendChild(cols);
 
@@ -2500,6 +2840,7 @@
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      persistSpeedSavings();
       flushPersist();
       stopTick();
     } else {
@@ -2507,7 +2848,10 @@
     }
   }, { signal: lifecycleSignal });
 
-  window.addEventListener("pagehide", flushPersist, { signal: lifecycleSignal });
+  window.addEventListener("pagehide", () => {
+    persistSpeedSavings();
+    flushPersist();
+  }, { signal: lifecycleSignal });
 
   // ── Tick ───────────────────────────────────────────────────────────────────
 
@@ -2524,6 +2868,10 @@
         writeRate(video, targetRate());
       }
     }
+    accountSpeedSavings(video);
+    // Only the open panel shows the running figures, and only idle ticks are
+    // slow enough to redraw it without noticing.
+    if (isMenuOpen && tickRate >= TICK_IDLE_MS) scheduleUiSync();
     checkAndHandleAds(video);
 
     // The heavier housekeeping (re-parenting, positioning, observer retarget)
@@ -2565,6 +2913,11 @@
     applySubtitleStyles,
     checkAndHandleAds,
     clickSkipButtons,
+    setSleepTimer,
+    /** Read-only snapshot of the running counters, for hosts and tests. */
+    stats() {
+      return { adsBlockedCount, adsTimeSavedSecs, speedSavedSecs };
+    },
     /**
      * Closes the menu if it is open. Returns whether it actually closed, so the
      * Android host can let the hardware Back button dismiss the menu first and
@@ -2586,6 +2939,8 @@
       window.clearTimeout(adCheckTimer);
       for (const timer of adWatchTimers) window.clearTimeout(timer);
       if (uiSyncHandle) window.cancelAnimationFrame(uiSyncHandle);
+      window.clearTimeout(sleepTimer);
+      persistSpeedSavings();
       flushPersist();
       lifecycleController.abort();
       for (const list of mediaWatchers) {
@@ -2611,7 +2966,7 @@
       document.getElementById(STYLE_ID)?.remove();
       document.getElementById(SUBTITLE_STYLE_ID)?.remove();
       document.getElementById(AD_SHIELD_STYLE_ID)?.remove();
-      for (const token of ["--pvsc-sub-color", "--pvsc-sub-size", "--pvsc-sub-bg", "--pvsc-sub-shadow", "--pvsc-sub-pad", "--pvsc-sub-radius"]) {
+      for (const token of ["--pvsc-sub-color", "--pvsc-sub-size", "--pvsc-sub-bg", "--pvsc-sub-shadow", "--pvsc-sub-pad", "--pvsc-sub-radius", "--pvsc-sub-lift"]) {
         document.documentElement.style.removeProperty(token);
       }
       if (window.__primeVideoSpeedControl === controlApi) {
