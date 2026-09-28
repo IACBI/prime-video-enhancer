@@ -64,10 +64,11 @@ You are responsible for bundle identifiers, signing certificates, provisioning p
 ```text
 mobile/
 ├── assets/speed-control.js  # Mobile copy of the shared controller
-├── lib/main.dart            # WebView, local request filtering, fullscreen handling
+├── lib/main.dart            # WebView, script injection, fullscreen handling
+├── lib/web_rules.dart       # Ad/telemetry request rules and the user agent
 ├── android/                 # Android host project
 ├── ios/                     # iOS host project
-├── test/                    # Flutter smoke tests
+├── test/                    # Unit tests for the request rules, widget smoke test
 └── pubspec.yaml             # Package metadata and dependencies
 ```
 
