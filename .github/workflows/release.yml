@@ -6,13 +6,16 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Read-only by default: the build jobs run third-party code (a Flutter action, a
+# Gradle build) and have no reason to hold a token that can write to the repo.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
     name: Build Windows Executables
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -21,6 +24,9 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
+
+      - name: Run desktop tests
+        run: dotnet run --project PrimeVideoSpeedApp.Tests/PrimeVideoSpeedApp.Tests.csproj -c Release
 
       - name: Build Single-File Executables
         shell: pwsh
@@ -42,6 +48,7 @@ jobs:
   build-android:
     name: Build Android Mobile APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -52,10 +59,22 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # Pinned to the version pubspec.lock was resolved with, so --enforce-lockfile
+      # below builds exactly the committed dependency set. An unpinned "stable"
+      # drifted away from the lockfile and could break a tag build unannounced.
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: 'stable'
+          flutter-version: '3.47.1'
+          cache: true
+
+      - name: Analyze and test
+        working-directory: mobile
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze
+          flutter test
 
       # A tagged build is a published build, so it must carry the stable release
       # key. Failing loudly here is deliberate: the Android Gradle Plugin would
@@ -85,7 +104,6 @@ jobs:
           PVSC_RELEASE_KEY_PASSWORD: ${{ secrets.PVSC_RELEASE_KEY_PASSWORD }}
         run: |
           cd mobile
-          flutter pub get
           flutter build apk --release
 
       - name: Remove release keystore
@@ -103,6 +121,9 @@ jobs:
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -156,7 +177,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*
           generate_release_notes: true
