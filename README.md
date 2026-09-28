@@ -39,10 +39,9 @@ The Android app opens Prime Video in an embedded WebView. Playback and service c
 | --- | --- |
 | Open or close the menu | Click the floating control or press `Escape` to close it |
 | Move the control | Drag it to a preferred position |
-| Change speed | Select a preset, use `+` / `-`, or press `↑` / `↓` |
+| Change speed | Select a preset, or press `+` / `-`, `]` / `[`, or `↑` / `↓` |
 | Reset speed | `\` |
-| Toggle subtitle styling | Select **Subtitles** or press `S` |
-| Toggle captions in the player | `Alt` + `C` or `Shift` + `C` |
+| Toggle subtitle styling | Select **Subtitles**, or press `S`, `Alt` + `C` or `Shift` + `C` |
 | Skip intro / next episode when offered | `N` |
 
 Settings are saved locally and reapplied when the player or subtitle track changes.
@@ -78,7 +77,7 @@ Output is written to `publish/Light/` and `publish/Standalone/`.
 
 ### Android app
 
-Requirements: Flutter 3.x, a compatible Android SDK, and Java 17.
+Requirements: Flutter 3.47.1 (the version CI builds with), a compatible Android SDK, and Java 17.
 
 ```powershell
 cd mobile

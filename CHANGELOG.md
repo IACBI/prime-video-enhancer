@@ -4,6 +4,15 @@ All notable user-facing changes are documented here. Version tags and GitHub Rel
 
 ## Unreleased
 
+- **The ad shield actually speeds ads up now.** It asked for 30x, which Chromium (Edge and Android WebView) rejects above 16x, so ads played at your normal speed behind the black cover, and the error also stopped the shield from noticing when the ad ended. Ads now run at 16x, falling back to 8x if playback stalls.
+- **Much lighter during playback.** Every progress-bar update used to trigger a full scan of the page for ad markers, around fifteen a second; only changes that can reveal an ad do now. Script time in a measured player page dropped by roughly three quarters.
+- **Desktop: fixed memory corruption in the window-icon code**, which wrote past a structure on every refresh.
+- Desktop: a request-blocking layer that only lasted a few milliseconds per check has been removed; all blocking now goes through the interceptor, which also starts earlier, so ad requests during the first page load are caught. Regional Amazon ad hosts such as `unagi.amazon.com.tr` are now blocked too.
+- Desktop: works behind an HTTP proxy, exits by itself when you close the Prime Video window, and a second launch opens another window instead of starting a competing helper.
+- Keyboard shortcuts no longer take over `Ctrl` combinations such as `Ctrl`+`S` or the zoom keys.
+- Generic "skip" buttons are only clicked while an ad is showing, so a player control such as "skip forward 10 seconds" is never pressed by mistake. A stuck detection released by the safety valve is no longer counted as a blocked ad.
+- Android: the WebView's data, including your signed-in session, is excluded from cloud backup and device transfer. Ad and telemetry filtering now matches the desktop app's host rules, which stops it from catching unrelated sites and adds missing regional Amazon hosts. The browser identity follows the installed WebView instead of a fixed 2023 Chrome version.
+- **Android: the APK download is less than half the size** (42.6 MB → 20.0 MB), still supporting every device it did before.
 - **Desktop: the network ad blocker no longer switches itself off during quiet stretches.** After 30 seconds without an ad request it tore down its own connection to the tab and stayed off until the next check restarted it, so ads requested in that gap went through.
 - Updating the controller while Prime Video is open no longer risks leaving a second, unresponsive panel on the page.
 - The ads-blocked counter recovers from a corrupted saved value instead of showing "NaN".

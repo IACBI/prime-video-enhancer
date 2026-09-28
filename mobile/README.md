@@ -1,6 +1,6 @@
 # Prime Video Enhancer mobile app
 
-The mobile app is a Flutter project that opens Prime Video in an embedded WebView. It shares the desktop controller's playback-speed and subtitle preferences, and applies best-effort filtering to selected ad-related and telemetry requests within that WebView.
+The mobile app is a Flutter project that opens Prime Video in an embedded WebView. It runs the same speed and subtitle controller as the desktop app, with its preferences stored in the WebView, and applies best-effort filtering to selected ad-related and telemetry requests within that WebView.
 
 For desktop downloads, privacy information, and the general quick start, see the [repository README](../README.md).
 
@@ -18,7 +18,7 @@ WebView playback support depends on the device, operating-system WebView, accoun
 - Loads `https://www.primevideo.com` in `flutter_inappwebview`.
 - Injects the bundled `assets/speed-control.js` at document start and reinjects it after navigation when necessary.
 - Offers playback speeds from `0.25x` to `4x` and locally stored subtitle preferences when the target page exposes compatible elements.
-- Uses `shouldInterceptRequest` to return an empty response for a small set of ad-related or telemetry URL patterns.
+- Uses `shouldInterceptRequest` to answer known ad requests with an empty VAST document and telemetry requests with an empty `204`, so neither reaches Amazon.
 - Uses immersive mode while the WebView enters fullscreen.
 
 The app does not install a VPN, proxy, root certificate, or system-wide request blocker. It does not collect account credentials or transmit telemetry.
@@ -27,7 +27,7 @@ The app does not install a VPN, proxy, root certificate, or system-wide request 
 
 Requirements:
 
-- Flutter 3.x
+- Flutter 3.47.1 (the version CI builds with)
 - Android SDK and a supported emulator or device for testing
 - Java 17
 

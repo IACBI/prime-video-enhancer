@@ -4,14 +4,14 @@ echo   Prime Video Enhancer - Single-File Publish Builder for GitHub Releases
 echo ===============================================================================
 echo.
 
-echo [1/2] Building Light Single-File EXE (Framework-Dependent, ~213 KB)...
+echo [1/2] Building Light Single-File EXE (Framework-Dependent, ~0.3 MB)...
 dotnet publish PrimeVideoSpeedApp.csproj -c Release --self-contained false -p:PublishSingleFile=true -p:SelfContained=false -o publish\Light
 if %errorlevel% neq 0 (
     echo [ERROR] Light build failed.
     pause
     exit /b %errorlevel%
 )
-echo --^> Light build completed successfully: publish\Light\PrimeVideoSpeedApp.exe (~213 KB)
+echo --^> Light build completed successfully: publish\Light\PrimeVideoSpeedApp.exe (~0.3 MB)
 echo.
 
 echo [2/2] Building Standalone Single-File EXE (Self-Contained, ~64 MB)...
