@@ -23,6 +23,7 @@ Include:
 
 - The Windows helper launches Microsoft Edge with a dedicated user-data directory.
 - It drives that browser over a Chromium DevTools endpoint on `127.0.0.1:9223`. The endpoint is never reachable from the network, but **it has no authentication**, and Windows applies no per-user restriction to loopback connections. While the helper runs, any process on the same machine — including one belonging to a different Windows account — can connect to it and control the browser, which means reading the cookies of the signed-in Prime Video session. Treat a shared or multi-user machine accordingly.
+- The helper only follows browser-tab addresses that point back at that same local port, so another process holding the port cannot redirect it to a different host.
 - The endpoint exists only for as long as the helper runs. The helper binds the browser to its own lifetime, so closing the helper closes the Prime Video window too, and the shortcuts it installs never carry the debugging flags.
 - Request filtering and controller injection run only in the Edge session started by the helper.
 - Released builds are single-file executables. They use the script and icon compiled into the executable and deliberately ignore a `speed-control.js` or `Assets\generate-app-icon.ps1` placed next to it, so putting the executable in a shared folder cannot turn those files into a way to run someone else's code.

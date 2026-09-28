@@ -35,12 +35,15 @@ Run the checks relevant to the files you changed:
 ```powershell
 dotnet run --project .\PrimeVideoSpeedApp.Tests\PrimeVideoSpeedApp.Tests.csproj -c Release
 node --check .\speed-control.js
+node .\PrimeVideoSpeedApp.Tests\controller-headless.js
 
 cd mobile
 flutter analyze
 flutter test
 flutter build apk --release
 ```
+
+`controller-headless.js` runs the controller in a real headless Edge on a throwaway profile, so it needs no running app and no account. It needs Node 22 or later; set `PVSC_BROWSER` to use another Chromium-based browser. The same checks run in CI on every push and pull request.
 
 The optional `PrimeVideoSpeedApp.Tests/browser-smoke.js` test needs a running local desktop session. Do not use a real account or personal data in screenshots, logs, or issue attachments.
 

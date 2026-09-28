@@ -4,6 +4,9 @@ All notable user-facing changes are documented here. Version tags and GitHub Rel
 
 ## Unreleased
 
+- **Lighter during playback: the subtitle stylesheet is no longer rewritten every second.** The controller reapplied the same stylesheet on every background tick, which makes the browser re-resolve style for the whole page each time even though nothing changed. It now writes only when the rules differ.
+- Desktop: the helper only connects to browser-tab addresses on its own local debugging port. Before, whatever answered on that port decided where it connected next. Windows are also no longer skipped for icon updates just because their title contains text such as `.js` or `Cursor`.
+- Tests: a new headless-browser test runs the controller for real (install, subtitles, speed keys, the ad shield, teardown), and CI now runs the desktop tests, that test, and the Android analysis and tests on every push and pull request instead of only when a release is tagged.
 - **The ad shield actually speeds ads up now.** It asked for 30x, which Chromium (Edge and Android WebView) rejects above 16x, so ads played at your normal speed behind the black cover, and the error also stopped the shield from noticing when the ad ended. Ads now run at 16x, falling back to 8x if playback stalls.
 - **Much lighter during playback.** Every progress-bar update used to trigger a full scan of the page for ad markers, around fifteen a second; only changes that can reveal an ad do now. Script time in a measured player page dropped by roughly three quarters.
 - **Desktop: fixed memory corruption in the window-icon code**, which wrote past a structure on every refresh.

@@ -90,7 +90,7 @@ Bug reports and focused pull requests are welcome. Read [CONTRIBUTING.md](CONTRI
 ```text
 Program.cs                 Windows helper: launches Edge, injects the controller, blocks ad requests
 speed-control.js           The controller itself: speed, subtitles, ad shield, panel
-PrimeVideoSpeedApp.Tests/  Desktop tests and an optional live browser test
+PrimeVideoSpeedApp.Tests/  Desktop tests, a headless controller test and an optional live browser test
 mobile/                    Flutter app for Android (and iOS source)
 ```
 
@@ -187,7 +187,7 @@ Hata bildirimlerine ve odaklı pull request'lere açığız. Çalıştırılmas�
 ```text
 Program.cs                 Windows helper: launches Edge, injects the controller, blocks ad requests
 speed-control.js           The controller itself: speed, subtitles, ad shield, panel
-PrimeVideoSpeedApp.Tests/  Desktop tests and an optional live browser test
+PrimeVideoSpeedApp.Tests/  Desktop tests, a headless controller test and an optional live browser test
 mobile/                    Flutter app for Android (and iOS source)
 ```
 
