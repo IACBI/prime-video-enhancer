@@ -133,7 +133,11 @@
   ].join(", ");
 
   const AD_SKIP_BUTTON_SELECTOR =
-    ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i], div[class*='ad-skip' i]";
+    ".atvwebplayersdk-ad-skip-button, [class*='adSkipButton' i], [class*='ad-skip-button' i], [aria-label*='skip ad' i], [aria-label*='reklamı atla' i], [aria-label*='reklamı geç' i], div[class*='ad-skip' i]";
+  // Generic "skip" controls. Only clicked while an ad is showing: outside one they
+  // match ordinary player buttons such as "skip forward 10 seconds".
+  const GENERIC_SKIP_BUTTON_SELECTOR =
+    "button[title*='skip' i], button[title*='atla' i], [data-testid*='skip' i]";
 
   // Note: .atvwebplayersdk-ad-resume-message is intentionally excluded here. It
   // appears once the ad break has ENDED and real content is resuming, so treating
@@ -277,8 +281,12 @@
   let lastPointerX = 0;
   let lastPointerY = 0;
 
-  const TARGET_AD_SPEED = 30;
-  const FALLBACK_AD_SPEED = 16;
+  // Chromium (Edge and Android WebView alike) accepts playbackRate up to 16 and
+  // throws NotSupportedError above it. The shield used to ask for 30, so every
+  // write threw: ads ran at the user's speed behind the cover, and the throw
+  // cut each tick short before the ad-end check could run.
+  const TARGET_AD_SPEED = 16;
+  const FALLBACK_AD_SPEED = 8;
   let currentAdSpeed = TARGET_AD_SPEED;
 
   let isAdCurrentlyActive = false;
@@ -341,7 +349,7 @@
     if (!video) return;
 
     // Pitch correction is a time-stretcher running on the audio thread. At the
-    // ad shield's 30x it cannot keep up on a low-end phone and stalls the whole
+    // ad shield's 16x it cannot keep up on a low-end phone and stalls the whole
     // pipeline — and the video is muted during ad mode anyway, so there is
     // nothing to preserve.
     const pitch = isAdCurrentlyActive ? false : preservePitch;
@@ -349,7 +357,11 @@
       video.preservesPitch = pitch;
     }
 
-    if (video.playbackRate !== rate) video.playbackRate = rate;
+    // A rejected rate must not abort the caller: the tick and the ad check both
+    // run after a write and would silently stop working.
+    try {
+      if (video.playbackRate !== rate) video.playbackRate = rate;
+    } catch {}
   }
 
   /**
@@ -393,8 +405,10 @@
     if (now - reassertWindowStart > 1000) {
       reassertWindowStart = now;
       reassertCount = 0;
-      reassertSuspended = false;
     }
+    // Stays suspended until the video next becomes ready (handleVideoReady);
+    // lifting it every second let the ping-pong resume at ~3 writes a second.
+    if (reassertSuspended) return;
 
     reassertCount += 1;
     if (reassertCount > MAX_REASSERTS_PER_SEC) {
@@ -420,7 +434,7 @@
 
   function handleAdStall() {
     if (isAdCurrentlyActive && currentAdSpeed > FALLBACK_AD_SPEED) {
-      console.warn("[pvsc] Ad playback stalled at 30x, falling back to 16x");
+      console.warn(`[pvsc] Ad playback stalled at ${TARGET_AD_SPEED}x, falling back to ${FALLBACK_AD_SPEED}x`);
       currentAdSpeed = FALLBACK_AD_SPEED;
       applySpeed();
     }
@@ -705,7 +719,10 @@
       }
     }
 
-    const skipButtons = document.querySelectorAll(AD_SKIP_BUTTON_SELECTOR);
+    const skipSelector = isAdCurrentlyActive
+      ? `${AD_SKIP_BUTTON_SELECTOR}, ${GENERIC_SKIP_BUTTON_SELECTOR}`
+      : AD_SKIP_BUTTON_SELECTOR;
+    const skipButtons = document.querySelectorAll(skipSelector);
     for (const btn of skipButtons) {
       if (btn.matches(AUTO_SKIP_SELECTOR)) continue;
       if (!handledAdSkipButtons.has(btn) && document.body.contains(btn) && isVisible(btn)) {
@@ -741,13 +758,14 @@
       writeRate(video, currentAdSpeed);
       setTickRate(TICK_AD_MS);
       if (video.paused) {
-        try { video.play(); } catch {}
+        video.play()?.catch(() => {});
       }
     }
 
     if (isAdCurrentlyActive && Date.now() - adModeStartedAt > AD_MAX_DURATION_MS) {
       adCooldownUntil = Date.now() + AD_COOLDOWN_AFTER_VALVE_MS;
       console.warn("[pvsc] Ad shield engaged for over " + AD_MAX_DURATION_MS / 1000 + "s — treating as stuck/false detection, restoring playback and suppressing the shield for " + AD_COOLDOWN_AFTER_VALVE_MS / 1000 + "s.");
+      adModeStartedAt = 0; // a false detection, not an ad: keep it out of the stats
       exitAdMode(video);
       return;
     }
@@ -758,7 +776,7 @@
       if (video !== adHiddenVideo || video.style.opacity !== "0") hideVideoForAd(video);
       showAdCover(video);
       if (video.paused) {
-        try { video.play(); } catch {}
+        video.play()?.catch(() => {});
       }
     } else if (isAdCurrentlyActive && !adDetected) {
       // Require the negative to hold for a while before declaring the ad over,
@@ -1183,7 +1201,7 @@
    */
   function armAdWatch() {
     for (const timer of adWatchTimers) window.clearTimeout(timer);
-    adWatchTimers = [120, 350, 800].map((delay) =>
+    adWatchTimers = [60, 120, 350, 800].map((delay) =>
       window.setTimeout(() => checkAndHandleAds(), delay)
     );
   }
@@ -1217,7 +1235,14 @@
 
         for (const mutation of mutations) {
           if (mutation.type === "attributes") {
-            sawAttribute = true;
+            // A progress bar restyled every frame kept the 60ms debounce
+            // saturated (~15 full DOM checks a second). Only a change on or
+            // above ad UI can reveal an ad; everything else waits for the tick.
+            const target = mutation.target;
+            if (!sawAttribute && target instanceof Element && !root.contains(target)
+                && (target.matches(AD_INDICATOR_SELECTOR) || target.querySelector(AD_INDICATOR_SELECTOR))) {
+              sawAttribute = true;
+            }
             continue;
           }
           if (mutation.type !== "childList") continue;
@@ -1762,6 +1787,7 @@
 
   let closeButtonCache = null;
   let closeButtonCacheKey = "";
+  let closeButtonSweptAt = 0;
 
   function findCloseButton() {
     // Sweeping every interactive element in Prime's DOM and calling
@@ -1772,6 +1798,12 @@
     if (closeButtonCacheKey === cacheKey && closeButtonCache?.isConnected) {
       return closeButtonCache;
     }
+    // A miss was re-swept every second (refresh runs on the idle tick); the
+    // button only appears with Prime's overlay, so retrying every 10s is enough.
+    if (closeButtonCacheKey === cacheKey && !closeButtonCache && Date.now() - closeButtonSweptAt < 10000) {
+      return null;
+    }
+    closeButtonSweptAt = Date.now();
 
     const candidates = Array.from(document.querySelectorAll("button, [role='button'], [aria-label], [title]"));
     let fallback = null;
@@ -2368,7 +2400,7 @@
     const tagName = target instanceof HTMLElement ? target.tagName.toLowerCase() : "";
     const isTyping = target instanceof HTMLElement
       && (target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select");
-    if (event.defaultPrevented || isTyping) {
+    if (event.defaultPrevented || isTyping || event.ctrlKey || event.metaKey) {
       return;
     }
 
@@ -2379,7 +2411,7 @@
       return;
     }
 
-    const key = event.key.toLowerCase();
+    const key = (event.key || "").toLowerCase();
     if (key === "]" || key === "+" || key === "=" || event.key === "ArrowUp") {
       event.preventDefault();
       setSpeed(speed + STEP);
@@ -2497,6 +2529,11 @@
   }
 
   function setTickRate(rate) {
+    // visibilitychange restores the right rate when the tab is shown again.
+    if (document.hidden) {
+      stopTick();
+      return;
+    }
     if (tickTimer && tickRate === rate) return;
     stopTick();
     tickRate = rate;
