@@ -599,6 +599,81 @@ try {
     await waitFor(paused, "the timer to pause once the ad ended", 5000);
   });
 
+  // ── Speed per title ──────────────────────────────────────────────────────────
+
+  await test("each title keeps its own speed as the page moves between titles", async () => {
+    const first = "AAAAAAAAAA";
+    const second = "BBBBBBBBBB";
+    await open(`${baseUrl}detail/${first}/`);
+    await evaluate("localStorage.clear()");
+    check((await install()) === "installed", "controller did not install on a title page");
+
+    const rate = () => evaluate(`document.getElementById("v").playbackRate`);
+    const preset = (value) => evaluate(`document.querySelector('.pvsc-rail button[data-speed="${value}"]').click()`);
+    // Prime Video is a single-page app: moving between titles rewrites the
+    // address without loading a page.
+    const goTo = (path) => evaluate(`history.pushState({}, "", ${JSON.stringify(path)}), true`);
+    const rateBecomes = (expected, what) => waitFor(async () => (await rate()) === expected, what, 4000);
+
+    await preset(1.5);
+    check((await rate()) === 1.5, "the preset did not apply");
+
+    // A title with no history of its own inherits the speed in use, as before.
+    await goTo(`/detail/${second}/`);
+    await sleep(1600);
+    check((await rate()) === 1.5, "an unknown title did not inherit the current speed");
+
+    await preset(2);
+    await goTo(`/detail/${first}/`);
+    await rateBecomes(1.5, "the first title to return to its own speed");
+    await goTo(`/detail/${second}/`);
+    await rateBecomes(2, "the second title to return to its own speed");
+
+    // A page that is not a title neither changes the speed nor forgets anything.
+    await goTo("/");
+    await sleep(1600);
+    check((await rate()) === 2, "leaving the title pages changed the speed");
+
+    // The remembered speed is there from the first moment of a fresh load, and
+    // the "last used" speed follows the title.
+    await open(`${baseUrl}detail/${first}/`);
+    check((await install()) === "installed", "controller did not install on the reloaded title");
+    check((await rate()) === 1.5, "a reload did not restore the title's speed");
+    await sleep(400);
+    check((await evaluate(`localStorage.getItem("primeVideoSpeedControl.speed")`)) === "1.5", "the last-used speed was not kept");
+  });
+
+  await test("only the most recent titles are remembered", async () => {
+    await open(`${baseUrl}detail/AAAAAAAAAA/`);
+    await evaluate("localStorage.clear()");
+    check((await install()) === "installed", "controller did not install");
+    // Ids made only of digits are integer-like; the order they were remembered
+    // in must still be the order they are forgotten in.
+    const id = (index) => String(1000000000 + index);
+    for (let index = 0; index < 120; index += 1) {
+      await evaluate(`history.pushState({}, "", "/detail/${id(index)}/"), true`);
+      await press("]");
+    }
+    await sleep(500);
+    const stored = JSON.parse(await evaluate(`localStorage.getItem("primeVideoSpeedControl.titleSpeeds")`));
+    const keys = stored.map(([key]) => key);
+    check(keys.length === 100, `expected 100 remembered titles, found ${keys.length}`);
+    check(keys[0] === id(20) && keys[99] === id(119), `the wrong titles were forgotten: kept ${keys[0]} to ${keys[99]}`);
+    check(stored.every(([, value]) => value >= 0.25 && value <= 4), "a remembered speed is outside the allowed range");
+  });
+
+  await test("corrupt remembered speeds are ignored", async () => {
+    await open(`${baseUrl}detail/CCCCCCCCCC/`);
+    await evaluate("localStorage.clear()");
+    await evaluate(`localStorage.setItem("primeVideoSpeedControl.titleSpeeds", '{"not":"an array"}')`);
+    check((await install()) === "installed", "controller failed to install over corrupt data");
+    check((await evaluate(`document.getElementById("v").playbackRate`)) === 1, "corrupt data changed the speed");
+    await evaluate(`${control}.destroy()`);
+    await evaluate(`localStorage.setItem("primeVideoSpeedControl.titleSpeeds", '[["CCCCCCCCCC", 99], ["DDDDDDDDDD", "fast"], [7, 1.5]]')`);
+    check((await install()) === "installed", "controller failed to install over out-of-range data");
+    check((await evaluate(`document.getElementById("v").playbackRate`)) === 1, "an out-of-range speed was applied");
+  });
+
   // ── Language and layout ──────────────────────────────────────────────────────
 
   await test("the panel speaks Turkish when the browser does, and English otherwise", async () => {

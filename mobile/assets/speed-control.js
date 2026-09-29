@@ -50,6 +50,14 @@
   const SPEED_SAVED_SEC_KEY = "primeVideoSpeedControl.speedTimeSavedSecs";
   const AUTO_SKIP_KEY = "primeVideoSpeedControl.autoSkip";
   const SUBTITLE_LIFT_KEY = "primeVideoSpeedControl.subtitleLift";
+  const TITLE_SPEEDS_KEY = "primeVideoSpeedControl.titleSpeeds";
+
+  // Prime Video (and the Amazon storefronts that host it) address a title as
+  // /detail/<10 character id>/..., on the page that also holds the player.
+  const TITLE_PATH_RE = /\/detail\/([A-Z0-9]{10})(?:\/|$)/i;
+
+  // Titles whose speed is remembered. Oldest are forgotten first.
+  const MAX_TITLE_SPEEDS = 100;
 
   // Marks the long-lived container Prime renders subtitles into. The stylesheet
   // targets its descendants, so a cue inserted later is styled during style
@@ -361,6 +369,43 @@
     speed = DEFAULT_SPEED;
   }
 
+  // ── Speed per title ────────────────────────────────────────────────────────
+
+  /** The id of the title the page is about, or "" away from a title page. */
+  function currentTitleKey() {
+    const match = TITLE_PATH_RE.exec(window.location.pathname);
+    return match ? match[1].toUpperCase() : "";
+  }
+
+  /**
+   * Reads the remembered speeds. A Map, not an object: ids that are all digits
+   * are integer-like keys, which an object would reorder, and the order is what
+   * decides which title is forgotten first.
+   */
+  function loadTitleSpeeds() {
+    const speeds = new Map();
+    try {
+      for (const [key, value] of JSON.parse(readStored(TITLE_SPEEDS_KEY) || "[]")) {
+        if (typeof key === "string" && Number.isFinite(value) && value >= MIN_SPEED && value <= MAX_SPEED) {
+          speeds.set(key, value);
+        }
+      }
+    } catch {
+      // Corrupt or foreign data: start over rather than fail to install.
+    }
+    return speeds;
+  }
+
+  const titleSpeeds = loadTitleSpeeds();
+  let lastTitleKey = currentTitleKey();
+
+  // A title the viewer has set a speed for opens at that speed; anything else
+  // keeps the speed they were last using, exactly as before. Only the value is
+  // read here: nothing that touches the page can run this early.
+  if (lastTitleKey && titleSpeeds.has(lastTitleKey)) {
+    speed = titleSpeeds.get(lastTitleKey);
+  }
+
   let subtitleColor = readStored(SUBTITLE_STORAGE_KEY) || DEFAULT_SUBTITLE_COLOR;
   if (!/^#[0-9A-Fa-f]{6}$/.test(subtitleColor)) {
     subtitleColor = DEFAULT_SUBTITLE_COLOR;
@@ -413,6 +458,14 @@
       } catch {}
     }
     pendingWrites.clear();
+  }
+
+  // Opening a title at its own speed makes that the speed in use, so the
+  // "last used" value follows it here just as it does when the page moves to a
+  // title later (see followTitle). Written now, not earlier, because persist()
+  // needs the queue above.
+  if (lastTitleKey && titleSpeeds.has(lastTitleKey)) {
+    persist(STORAGE_KEY, String(speed));
   }
 
   // ── 5. Playback / ads ──────────────────────────────────────────────────────
@@ -1553,6 +1606,36 @@
     // is deferred so it cannot land in the same task as the write.
     applySpeed();
     persist(STORAGE_KEY, String(speed));
+    rememberTitleSpeed();
+    scheduleUiSync();
+  }
+
+  function rememberTitleSpeed() {
+    const key = currentTitleKey();
+    if (!key) return;
+    // Delete first so the title moves to the newest end of the Map.
+    titleSpeeds.delete(key);
+    titleSpeeds.set(key, speed);
+    while (titleSpeeds.size > MAX_TITLE_SPEEDS) {
+      titleSpeeds.delete(titleSpeeds.keys().next().value);
+    }
+    persist(TITLE_SPEEDS_KEY, JSON.stringify([...titleSpeeds]));
+  }
+
+  /**
+   * Notices that the page moved to another title (Prime Video is a single-page
+   * app, so nothing reloads) and switches to the speed remembered for it.
+   */
+  function followTitle() {
+    const key = currentTitleKey();
+    if (key === lastTitleKey) return;
+    lastTitleKey = key;
+
+    const remembered = key ? titleSpeeds.get(key) : undefined;
+    if (remembered === undefined || remembered === speed) return;
+    speed = remembered;
+    persist(STORAGE_KEY, String(speed));
+    applySpeed();
     scheduleUiSync();
   }
 
@@ -2860,6 +2943,7 @@
   let refreshCounter = 0;
 
   function tick() {
+    followTitle();
     const video = findVideo();
     if (video) {
       attachVideoListeners(video);

@@ -19,7 +19,7 @@ What it does not do: it does not bypass DRM, download video, collect telemetry, 
 
 ### Features
 
-- Playback speed from `0.25x` to `4x`, with presets and keyboard shortcuts.
+- Playback speed from `0.25x` to `4x`, with presets and keyboard shortcuts. A title reopens at the speed you last set on it (the last 100 titles are remembered); one you have not set a speed on opens at the speed you were using.
 - Subtitle colour, size and backdrop, applied from the first frame of each line and remembered between sessions.
 - Optional pitch correction, so voices keep their natural pitch at higher speeds.
 - An ad shield that blocks known ad and telemetry requests and, when an ad still plays, mutes and covers it and runs it at up to 16x. Results vary by title, region and account.
@@ -122,7 +122,7 @@ Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, ç
 
 ### Özellikler
 
-- `0.25x` ile `4x` arası oynatma hızı; hazır değerler ve klavye kısayolları.
+- `0.25x` ile `4x` arası oynatma hızı; hazır değerler ve klavye kısayolları. Bir içerik, üzerinde en son ayarladığınız hızla yeniden açılır (son 100 içerik hatırlanır); hız ayarlamadığınız içerik, o an kullandığınız hızla açılır.
 - Altyazı rengi, boyutu ve arka planı. Her satır ilk karesinden itibaren sizin ayarınızla görünür, ayarlar oturumlar arasında hatırlanır.
 - İsteğe bağlı perde (pitch) düzeltmesi: hız artsa da sesler doğal tonunda kalır.
 - Reklam kalkanı: bilinen reklam ve telemetri isteklerini engeller; buna rağmen oynayan bir reklamı sessize alır, üstünü kapatır ve 16x'e kadar hızlandırır. Sonuç içeriğe, bölgeye ve hesaba göre değişir.
