@@ -45,6 +45,8 @@ flutter build apk --release
 
 `controller-headless.js` runs the controller in a real headless Edge on a throwaway profile, so it needs no running app and no account. It needs Node 22 or later; set `PVSC_BROWSER` to use another Chromium-based browser. The same checks run in CI on every push and pull request.
 
+Two more scripts are for a maintainer to run by hand before a release, because they use the real site and a real device: `PrimeVideoSpeedApp.Tests/helper-e2e.js` starts the built desktop helper on a throwaway data folder (`PVSC_DATA_DIR`) with port 9223 held, and checks injection, re-injection after a reload, and that the browser ends with the helper; `PrimeVideoSpeedApp.Tests/android-e2e.js` installs an inspectable APK (`flutter build apk --release --dart-define=PVSC_WEBVIEW_DEBUG=true`) on an emulator or device and checks injection and the navigation limits.
+
 The optional `PrimeVideoSpeedApp.Tests/browser-smoke.js` test needs a running local desktop session. Do not use a real account or personal data in screenshots, logs, or issue attachments.
 
 ## Controller changes
@@ -52,7 +54,7 @@ The optional `PrimeVideoSpeedApp.Tests/browser-smoke.js` test needs a running lo
 The desktop controller at `speed-control.js` is mirrored at `mobile/assets/speed-control.js`. Changes to one must be applied to the other. Keep these values aligned in the same pull request:
 
 - the version exported by both controller copies;
-- `CdpPayloads.ScriptVersion` in `Program.cs`;
+- `CdpPayloads.ScriptVersion` in `Cdp/CdpPayloads.cs`;
 - the version expectations in desktop and browser-smoke tests.
 
 ## Pull requests

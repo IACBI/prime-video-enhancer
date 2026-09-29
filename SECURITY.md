@@ -31,6 +31,7 @@ Include:
 ### Mobile
 
 - The Flutter app applies request filtering only inside its embedded WebView.
+- The WebView only navigates to `primevideo.com` and Amazon pages; a link to anywhere else is refused, and only those sites can receive the protected-media (DRM) permission. The app has no address bar, so a page from elsewhere would otherwise look exactly like Prime Video.
 - It does not configure a device-wide proxy, VPN, root certificate, or HTTPS interception service.
 - Release APKs are signed with a stable release key. Before installing, check the download against `SHA256SUMS.txt` on the release page, and confirm the signing certificate matches earlier releases:
 

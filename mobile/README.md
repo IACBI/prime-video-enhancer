@@ -20,6 +20,7 @@ WebView playback support depends on the device, operating-system WebView, accoun
 - Offers playback speeds from `0.25x` to `4x` and locally stored subtitle preferences when the target page exposes compatible elements.
 - Uses `shouldInterceptRequest` to answer known ad requests with an empty VAST document and telemetry requests with an empty `204`, so neither reaches Amazon.
 - Uses immersive mode while the WebView enters fullscreen.
+- Keeps the WebView on `primevideo.com` and Amazon pages: any other link is refused with a short notice, and only those sites can receive the protected-media permission.
 
 The app does not install a VPN, proxy, root certificate, or system-wide request blocker. It does not collect account credentials or transmit telemetry.
 
@@ -71,6 +72,12 @@ mobile/
 ├── test/                    # Unit tests for the request rules, widget smoke test
 └── pubspec.yaml             # Package metadata and dependencies
 ```
+
+## Notes for maintainers
+
+- **Request filtering has a cost.** `shouldInterceptRequest` sends every request the WebView makes through the platform channel to Dart. Measured on an Android 16 emulator against the real site, a request answered by the Dart handler took about 22 ms against about 6.5 ms for a local fetch, roughly 16 ms more sequentially and 3.6 ms more when requests overlap. That is noticeable while a page loads and irrelevant for video segments. The plugin skips its native content blockers whenever this callback is on, and a native block returns an empty body rather than the VAST document ad calls get today, so it is not a drop-in replacement.
+- **Android toolchain.** The project sits on Flutter's minimum supported versions (Gradle 8.14, Android Gradle Plugin 8.11.1, Kotlin 2.2.20); Flutter 3.47.1 warns and asks for 9.1.0, 9.0.1 and 2.3.20. CI pins Flutter, so nothing breaks until that pin moves. The migration was tried: Gradle 9.1.0 and the two plugin versions resolve, the app's own files need Flutter's current template (drop `kotlin-android`, move the JVM target to a top-level `kotlin { compilerOptions { ... } }`, and set `android.newDsl=false` and `android.builtInKotlin=false` in `gradle.properties`), but `flutter_inappwebview_android` 1.1.3 then fails because it still uses `proguard-android.txt`, which AGP 9 rejects. Only the 1.2.0 beta line fixes that, so do this when a stable release of the plugin ships, then run `PrimeVideoSpeedApp.Tests/android-e2e.js`.
+- **Tool edits.** `flutter analyze` and `flutter build` rewrite `analysis_options.yaml` and `android/gradle.properties` in place; revert them unless the change is intended.
 
 ## Keeping the controller in sync
 

@@ -23,7 +23,9 @@ What it does not do: it does not bypass DRM, download video, collect telemetry, 
 - Subtitle colour, size and backdrop, applied from the first frame of each line and remembered between sessions.
 - Optional pitch correction, so voices keep their natural pitch at higher speeds.
 - An ad shield that blocks known ad and telemetry requests and, when an ad still plays, mutes and covers it and runs it at up to 16x. Results vary by title, region and account.
-- Automatic Skip Intro / Next Episode when Prime Video offers the button.
+- Automatic Skip Intro / Next Episode when Prime Video offers the button, with a switch in the panel if you would rather press it yourself.
+- A sleep timer (15 to 90 minutes) that pauses playback, a running total of the time faster playback has saved you, and a control that raises subtitles off the bottom edge of the picture.
+- The panel speaks English or Turkish, following the browser or device language.
 - An Android app (APK) built on the same controller. The iOS project is in the repository but no iOS build is published.
 
 ### Requirements
@@ -89,9 +91,12 @@ There is no settings file. Everything you change in the menu is saved automatica
 Bug reports and focused pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the checks to run and the rule that `speed-control.js` and `mobile/assets/speed-control.js` stay identical, and [SUPPORT.md](SUPPORT.md) for troubleshooting. Report security problems privately as described in [SECURITY.md](SECURITY.md), never in a public issue.
 
 ```text
-Program.cs                 Windows helper: launches Edge, injects the controller, blocks ad requests
+Program.cs                 Windows helper: starts Edge and watches its Prime Video tabs
+Cdp/                       One DevTools session per tab: injects the controller, answers ad requests
+Windows/                   Win32 interop: window icon, browser lifetime, data folder
+AdBlocker.cs               The ad and telemetry rules
 speed-control.js           The controller itself: speed, subtitles, ad shield, panel
-PrimeVideoSpeedApp.Tests/  Desktop tests, a headless controller test and an optional live browser test
+PrimeVideoSpeedApp.Tests/  Desktop tests (some against a real headless Edge), a headless controller test, manual end-to-end scripts
 mobile/                    Flutter app for Android (and iOS source)
 ```
 
@@ -121,7 +126,9 @@ Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, ç
 - Altyazı rengi, boyutu ve arka planı. Her satır ilk karesinden itibaren sizin ayarınızla görünür, ayarlar oturumlar arasında hatırlanır.
 - İsteğe bağlı perde (pitch) düzeltmesi: hız artsa da sesler doğal tonunda kalır.
 - Reklam kalkanı: bilinen reklam ve telemetri isteklerini engeller; buna rağmen oynayan bir reklamı sessize alır, üstünü kapatır ve 16x'e kadar hızlandırır. Sonuç içeriğe, bölgeye ve hesaba göre değişir.
-- Prime Video "Girişi Atla / Sonraki Bölüm" düğmesini gösterdiğinde otomatik atlama.
+- Prime Video "Girişi Atla / Sonraki Bölüm" düğmesini gösterdiğinde otomatik atlama; düğmeye kendiniz basmak isterseniz panelden kapatılabilir.
+- Oynatmayı belirli bir süre sonra (15 ile 90 dakika) duraklatan uyku zamanlayıcısı, hızlı izleyerek kazandığınız süreyi gösteren sayaç ve altyazıyı görüntünün alt kenarından yukarı kaldıran bir kontrol.
+- Panel, tarayıcının veya cihazın diline göre İngilizce ya da Türkçe konuşur.
 - Aynı kontrolü kullanan bir Android uygulaması (APK). iOS projesi depoda var, ancak yayımlanmış bir iOS sürümü yok.
 
 ### Gereksinimler
@@ -187,9 +194,12 @@ Ayrı bir ayar dosyası yok. Menüde değiştirdiğiniz her şey uygulamanın ke
 Hata bildirimlerine ve odaklı pull request'lere açığız. Çalıştırılması gereken kontroller ve `speed-control.js` ile `mobile/assets/speed-control.js` dosyalarının birebir aynı kalması kuralı için [CONTRIBUTING.md](CONTRIBUTING.md), sorun giderme için [SUPPORT.md](SUPPORT.md) dosyasına bakın. Güvenlik sorunlarını herkese açık bir issue'da değil, [SECURITY.md](SECURITY.md) dosyasında anlatıldığı gibi gizli olarak bildirin.
 
 ```text
-Program.cs                 Windows helper: launches Edge, injects the controller, blocks ad requests
+Program.cs                 Windows helper: starts Edge and watches its Prime Video tabs
+Cdp/                       One DevTools session per tab: injects the controller, answers ad requests
+Windows/                   Win32 interop: window icon, browser lifetime, data folder
+AdBlocker.cs               The ad and telemetry rules
 speed-control.js           The controller itself: speed, subtitles, ad shield, panel
-PrimeVideoSpeedApp.Tests/  Desktop tests, a headless controller test and an optional live browser test
+PrimeVideoSpeedApp.Tests/  Desktop tests (some against a real headless Edge), a headless controller test, manual end-to-end scripts
 mobile/                    Flutter app for Android (and iOS source)
 ```
 
