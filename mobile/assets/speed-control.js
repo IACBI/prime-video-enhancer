@@ -30,7 +30,7 @@
 
   // ── 1. Constants ───────────────────────────────────────────────────────────
 
-  const VERSION = "3.7.0";
+  const VERSION = "3.8.0";
 
   const ROOT_ID = "pvsc-root";
   const STYLE_ID = "pvsc-style";

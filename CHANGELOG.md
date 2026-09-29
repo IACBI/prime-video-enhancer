@@ -2,7 +2,7 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
-## Unreleased
+## 3.8.0 — 2026-09-29
 
 - **Each title remembers its own speed.** A title reopens at the speed you last set on it, whether you come back to it inside the app or after a restart; a title you have not set a speed on opens at the speed you were using, as before. The last 100 titles are kept. Titles are told apart by the id in the page address, so an episode that Prime Video gives an address of its own counts as its own title.
 - **New in the panel:** an Auto-skip switch (on by default, as before), a sleep timer (15 to 90 minutes, waits out an ad break), a running total of the time faster playback saved, and a Raise control that lifts subtitles by up to 40% of the picture height. The panel follows the browser language (English or Turkish), and ad countdowns and skip buttons are recognised in more of Prime Video's languages.

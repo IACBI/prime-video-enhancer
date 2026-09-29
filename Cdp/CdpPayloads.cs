@@ -4,7 +4,7 @@ internal static class CdpPayloads
 {
     // Must match the version exported by speed-control.js. Version drift either
     // causes needless reinjection or prevents a corrected script from loading.
-    private const string ScriptVersion = "3.7.0";
+    private const string ScriptVersion = "3.8.0";
 
     // Answers two questions in one round trip: where is the tab now, and is the
     // current controller still installed in it. It reads only; the controller's
