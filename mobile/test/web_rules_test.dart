@@ -73,6 +73,14 @@ void main() {
     });
   });
 
+  test('blockedLinkMessage follows the device language', () {
+    expect(blockedLinkMessage('example.com', 'tr'),
+        'example.com bağlantısı engellendi');
+    expect(blockedLinkMessage('example.com', 'en'),
+        'Blocked a link to example.com');
+    expect(blockedLinkMessage('intent', 'de'), 'Blocked a link to intent');
+  });
+
   test('isFirstPartyHost matches the hosts that may hold the DRM permission', () {
     expect(isFirstPartyHost('www.primevideo.com'), isTrue);
     expect(isFirstPartyHost('www.amazon.de'), isTrue);

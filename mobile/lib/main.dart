@@ -375,8 +375,10 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                           ScaffoldMessenger.of(context)
                             ..hideCurrentSnackBar()
                             ..showSnackBar(SnackBar(
-                              content: Text(
-                                  'Blocked a link to ${url.host.isEmpty ? url.scheme : url.host}'),
+                              content: Text(blockedLinkMessage(
+                                  url.host.isEmpty ? url.scheme : url.host,
+                                  WidgetsBinding.instance.platformDispatcher
+                                      .locale.languageCode)),
                               duration: const Duration(seconds: 3),
                             ));
                         }

@@ -157,6 +157,14 @@ bool isAllowedNavigation(Uri uri) {
   return isFirstPartyHost(uri.host.toLowerCase());
 }
 
+/// The notice shown when a link is refused, in the device's language (Turkish or
+/// English, like the controller's panel). [target] is the host, or the scheme for
+/// links that have none, such as `intent:`.
+String blockedLinkMessage(String target, String languageCode) =>
+    languageCode == 'tr'
+        ? '$target bağlantısı engellendi'
+        : 'Blocked a link to $target';
+
 /// Turns the Android WebView's own user agent into the plain Chrome one.
 ///
 /// The app used to pin a Chrome 120 string, which aged into a browser Prime
