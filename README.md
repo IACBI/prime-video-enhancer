@@ -44,7 +44,7 @@ Download from the [latest release](https://github.com/IACBI/prime-video-enhancer
 | `PrimeVideoSpeedApp-Light.exe` | Windows, smaller, needs the .NET 8 Runtime |
 | `PrimeVideoSpeedApp-Mobile.apk` | Android |
 
-Releases after 3.7.0 also include `SHA256SUMS.txt` for checking a download, and the Android app is signed with a stable release key; [SECURITY.md](SECURITY.md) shows how to verify both.
+Releases after 3.7.0 also include `SHA256SUMS.txt` for checking a download; [SECURITY.md](SECURITY.md) shows how. The Android APK is still signed with a temporary debug key, so installing a new release means uninstalling the old one first, which signs you out.
 
 To build from source instead:
 
@@ -147,7 +147,7 @@ Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, ç
 | `PrimeVideoSpeedApp-Light.exe` | Windows, daha küçük, .NET 8 Runtime gerekir |
 | `PrimeVideoSpeedApp-Mobile.apk` | Android |
 
-3.7.0'dan sonraki sürümlerde indirilen dosyayı doğrulamak için `SHA256SUMS.txt` de yer alır ve Android uygulaması sabit bir sürüm anahtarıyla imzalanır. İkisinin nasıl doğrulanacağı [SECURITY.md](SECURITY.md) dosyasında.
+3.7.0'dan sonraki sürümlerde indirilen dosyayı doğrulamak için `SHA256SUMS.txt` de yer alır; nasıl yapılacağı [SECURITY.md](SECURITY.md) dosyasında. Android APK'sı hâlâ geçici bir debug anahtarıyla imzalanıyor; bu yüzden yeni sürümü kurmadan önce eskisini kaldırmanız gerekir, bu da oturumu kapatır.
 
 Kaynaktan derlemek isterseniz:
 
