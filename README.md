@@ -15,7 +15,7 @@ A local companion for watching Prime Video. On Windows it opens Prime Video in i
 
 It is an unofficial project, not affiliated with Amazon or Prime Video. Prime Video changes its player without notice, so any feature here can stop working until the controller catches up.
 
-What it does not do: it does not bypass DRM, download video, collect telemetry, or send your credentials, cookies or viewing history anywhere. Request filtering stays inside the app's own browser window or WebView; nothing is installed system-wide. The [security policy](SECURITY.md) covers the details, including the local debugging endpoint the desktop app relies on.
+What it does not do: it does not bypass DRM, download video, collect telemetry, or send your credentials, cookies or viewing history anywhere. Request filtering stays inside the app's own browser window or WebView; nothing is installed system-wide. The [security policy](SECURITY.md) covers the details, including the private pipe the desktop app uses to drive Edge.
 
 ### Features
 
@@ -82,7 +82,7 @@ On Android, tap the control to open the menu; the Back button closes the menu be
 There is no settings file. Everything you change in the menu is saved automatically in the app's own browser storage.
 
 - **Desktop data** lives in `%LOCALAPPDATA%\PrimeVideoSpeedController\`. Deleting that folder resets every preference and signs you out of the dedicated Edge profile.
-- **Debugging port:** the desktop app talks to Edge on `127.0.0.1:9223`, or on a free port it picks (and prints) when another program holds 9223.
+- **DevTools connection:** the desktop app talks to Edge over a private pipe it hands only to the browser it starts; no debugging port is opened.
 - **`PVSC_DATA_DIR`:** set it to a folder to keep the browser profile and icon cache there instead. The Start Menu entry is then left alone, so the copy can run beside a normal installation.
 - **Mobile WebView inspection** is off in every build. Developers can enable it with `flutter run --dart-define=PVSC_WEBVIEW_DEBUG=true`.
 
@@ -118,7 +118,7 @@ Prime Video izlerken yanında çalışan yerel bir yardımcı. Windows'ta Prime 
 
 Resmî bir proje değildir; Amazon veya Prime Video ile bir bağı yoktur. Prime Video oynatıcısını haber vermeden değiştirebildiği için buradaki herhangi bir özellik, kontrol güncellenene kadar çalışmayabilir.
 
-Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, çerezlerinizi ya da izleme geçmişinizi hiçbir yere göndermez. İstek filtreleme yalnızca uygulamanın kendi tarayıcı penceresinde veya WebView'unda çalışır, sisteme hiçbir şey kurulmaz. Masaüstü uygulamanın kullandığı yerel hata ayıklama bağlantısı dâhil ayrıntılar [güvenlik politikasında](SECURITY.md).
+Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, çerezlerinizi ya da izleme geçmişinizi hiçbir yere göndermez. İstek filtreleme yalnızca uygulamanın kendi tarayıcı penceresinde veya WebView'unda çalışır, sisteme hiçbir şey kurulmaz. Masaüstü uygulamanın Edge'i yönetmek için kullandığı özel pipe dâhil ayrıntılar [güvenlik politikasında](SECURITY.md).
 
 ### Özellikler
 
@@ -185,7 +185,7 @@ Android'de menüyü açmak için kontrole dokunun; Geri tuşu önce menüyü kap
 Ayrı bir ayar dosyası yok. Menüde değiştirdiğiniz her şey uygulamanın kendi tarayıcı depolamasına otomatik kaydedilir.
 
 - **Masaüstü verileri** `%LOCALAPPDATA%\PrimeVideoSpeedController\` klasöründe durur. Bu klasörü silmek bütün tercihleri sıfırlar ve ayrılmış Edge profilindeki oturumunuzu kapatır.
-- **Hata ayıklama portu:** masaüstü uygulama Edge ile `127.0.0.1:9223` üzerinden konuşur; başka bir program 9223'ü tutuyorsa boş bir port seçer ve ekrana yazar.
+- **DevTools bağlantısı:** masaüstü uygulama Edge ile yalnızca kendi başlattığı tarayıcıya verilen özel bir pipe üzerinden konuşur; hiçbir hata ayıklama portu açılmaz.
 - **`PVSC_DATA_DIR`:** bir klasör adı verirseniz tarayıcı profili ve simge önbelleği orada tutulur. Başlat menüsü kısayoluna dokunulmaz; böylece kopya normal kurulumun yanında çalışabilir.
 - **Mobil WebView incelemesi** hiçbir derlemede açık değildir. Geliştiriciler `flutter run --dart-define=PVSC_WEBVIEW_DEBUG=true` ile açabilir.
 
