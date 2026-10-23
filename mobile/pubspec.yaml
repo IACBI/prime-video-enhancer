@@ -1,7 +1,7 @@
 name: prime_video_enhancer_mobile
 description: "Prime Video Speed & Subtitle Controller Mobile App (Android & iOS)"
 publish_to: 'none'
-version: 3.8.0+380
+version: 3.8.1+381
 
 environment:
   sdk: ^3.8.0
