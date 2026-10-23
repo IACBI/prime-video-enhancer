@@ -1,4 +1,3 @@
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
@@ -22,17 +21,17 @@ internal sealed class TargetSessionOptions
 }
 
 /// <summary>
-/// One persistent DevTools connection to one browser tab.
+/// One persistent DevTools conversation with one browser tab.
 /// </summary>
 /// <remarks>
-/// It owns both jobs the helper does for a tab, on a single socket. Requests that
+/// It owns both jobs the helper does for a tab, on a single channel. Requests that
 /// match an ad pattern are paused and answered here, and the controller is
 /// injected when the page finishes parsing rather than when a poll next notices
 /// it is missing. Navigation events say when that happens, so an idle tab costs
-/// nothing; a slow check on the same socket catches anything the events miss.
+/// nothing; a slow check on the same channel catches anything the events miss.
 ///
-/// The socket is only ever written from the receive loop, which is what keeps the
-/// single-writer rule of <see cref="ClientWebSocket"/> without a lock.
+/// Commands are sent from the receive loop itself, one at a time, so nothing here
+/// needs a lock around the channel.
 /// </remarks>
 internal sealed class TargetSession
 {
@@ -40,51 +39,33 @@ internal sealed class TargetSession
     private const int PageEnableId = 101;
     private const int FetchEnableId = 100;
 
-    private readonly ClientWebSocket socket = new();
+    private readonly ICdpChannel channel;
     private readonly TargetSessionOptions options;
-    private readonly byte[] buffer = new byte[32768];
     private string currentUrl;
     private int nextId = 300;
 
-    private TargetSession(string initialUrl, TargetSessionOptions options)
+    private TargetSession(ICdpChannel channel, string initialUrl, TargetSessionOptions options)
     {
+        this.channel = channel;
         currentUrl = initialUrl;
         this.options = options;
-        socket.Options.Proxy = null;
     }
 
     /// <summary>
-    /// Runs until the tab closes, the socket drops, or <paramref name="cancellationToken"/> fires.
+    /// Runs until the tab closes, <paramref name="channel"/> closes, or <paramref name="cancellationToken"/> fires.
     /// </summary>
-    public static async Task RunAsync(
-        string webSocketUrl,
+    /// <remarks>
+    /// The channel is borrowed, not owned: the caller opened it and detaches it.
+    /// </remarks>
+    public static Task RunAsync(
+        ICdpChannel channel,
         string initialUrl,
         TargetSessionOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        new TargetSession(channel, initialUrl, options).RunCoreAsync(cancellationToken);
+
+    private async Task RunCoreAsync(CancellationToken cancellationToken)
     {
-        var session = new TargetSession(initialUrl, options);
-        try
-        {
-            await session.RunCoreAsync(webSocketUrl, cancellationToken);
-        }
-        finally
-        {
-            session.socket.Dispose();
-        }
-    }
-
-    private async Task RunCoreAsync(string webSocketUrl, CancellationToken cancellationToken)
-    {
-        using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-        {
-            connectTimeout.CancelAfter(TimeSpan.FromSeconds(5));
-            await socket.ConnectAsync(new Uri(webSocketUrl), connectTimeout.Token);
-        }
-
-        // Cancelling a pending receive aborts a ClientWebSocket anyway, so do it
-        // deliberately: that is what ends the loop below.
-        using var registration = cancellationToken.Register(() => socket.Abort());
-
         await SendAsync(new
         {
             id = FetchEnableId,
@@ -102,11 +83,11 @@ internal sealed class TargetSession
         var nextSafetyCheck = DateTime.UtcNow + options.SafetyCheckInterval;
         Task<string?>? receive = null;
 
-        while (socket.State == WebSocketState.Open)
+        while (true)
         {
-            // No receive timeout: cancelling one aborts the socket. Waiting on the
-            // receive alongside a timer lets the loop do periodic work instead.
-            receive ??= CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, CancellationToken.None);
+            // No receive timeout: cancelling the token is what ends the loop. Waiting on
+            // the receive alongside a timer lets the loop do periodic work instead.
+            receive ??= channel.ReceiveAsync(cancellationToken);
 
             var wait = nextSafetyCheck - DateTime.UtcNow;
             using var timer = new CancellationTokenSource();
@@ -175,7 +156,7 @@ internal sealed class TargetSession
     /// </summary>
     /// <remarks>
     /// It reports the address as well because the one the tab was discovered at
-    /// can be stale by the time the socket is up.
+    /// can be stale by the time the session is up.
     /// </remarks>
     private async Task HandleCheckResultAsync(JsonElement root)
     {
@@ -301,7 +282,7 @@ internal sealed class TargetSession
         catch (Exception ex)
         {
             Console.WriteLine($"Ad shield: failed to handle a network request event ({ex.GetType().Name}: {ex.Message}).");
-            if (pausedRequestId is not null && socket.State == WebSocketState.Open)
+            if (pausedRequestId is not null)
             {
                 // A request left paused hangs in the browser for good.
                 try
@@ -319,6 +300,5 @@ internal sealed class TargetSession
     private Task SendAsync<T>(T payload) =>
         SendAsync(JsonSerializer.SerializeToUtf8Bytes(payload));
 
-    private Task SendAsync(byte[] payload) =>
-        socket.SendAsync(payload, WebSocketMessageType.Text, true, CancellationToken.None);
+    private Task SendAsync(byte[] payload) => channel.SendAsync(payload);
 }

@@ -1,26 +1,24 @@
 using System.Collections.Concurrent;
-using System.Net.WebSockets;
 using System.Text.Json;
 
 /// <summary>
 /// Finds the Prime Video tabs of one browser and gives each a <see cref="TargetSession"/>.
 /// </summary>
 /// <remarks>
-/// Polling is only for discovery now: a list request over HTTP, and a session
-/// started for a tab that has none. A tab that already has one is left alone, so
-/// a steady poll no longer opens a socket per tab per round.
+/// Polling is only for discovery: a <c>Target.getTargets</c> command on the
+/// browser's pipe, and a session started for a tab that has none. A tab that
+/// already has one is left alone, so a steady poll does not attach to every tab
+/// on every round.
 /// </remarks>
 internal sealed class TargetWatcher
 {
-    private readonly HttpClient httpClient;
-    private readonly int port;
+    private readonly CdpConnection connection;
     private readonly TargetSessionOptions options;
     private readonly ConcurrentDictionary<string, Task> sessions = new(StringComparer.Ordinal);
 
-    public TargetWatcher(HttpClient httpClient, int port, TargetSessionOptions options)
+    public TargetWatcher(CdpConnection connection, TargetSessionOptions options)
     {
-        this.httpClient = httpClient;
-        this.port = port;
+        this.connection = connection;
         this.options = options;
     }
 
@@ -37,33 +35,33 @@ internal sealed class TargetWatcher
         foreach (var target in await GetTargetsAsync(cancellationToken))
         {
             if (!string.Equals(target.Type, "page", StringComparison.OrdinalIgnoreCase) ||
-                !options.IsPrimeVideoUrl(target.Url) ||
-                PrimeVideoTargetMatcher.TryGetLocalDebuggerUrl(target, port) is not { } debuggerUrl)
+                !options.IsPrimeVideoUrl(target.Url))
             {
                 continue;
             }
 
             found = true;
-            if (InterceptorRegistry.TryRegister(debuggerUrl))
+            if (InterceptorRegistry.TryRegister(target.TargetId))
             {
-                sessions[debuggerUrl] = RunSessionAsync(debuggerUrl, target.Url);
+                sessions[target.TargetId] = RunSessionAsync(target.TargetId, target.Url);
             }
         }
 
         return found;
     }
 
-    private async Task RunSessionAsync(string debuggerUrl, string initialUrl)
+    private async Task RunSessionAsync(string targetId, string initialUrl)
     {
         // Off the caller's stack: a session lives as long as its tab.
         await Task.Yield();
         try
         {
-            await TargetSession.RunAsync(debuggerUrl, initialUrl, options);
+            await using var channel = await connection.AttachAsync(targetId);
+            await TargetSession.RunAsync(channel, initialUrl, options);
         }
-        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or IOException or HttpRequestException)
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or InvalidOperationException)
         {
-            // The tab navigated away, crashed, or Edge is closing.
+            // The tab closed or navigated away, or the browser is closing.
         }
         catch (Exception ex)
         {
@@ -71,7 +69,7 @@ internal sealed class TargetWatcher
         }
         finally
         {
-            InterceptorRegistry.Remove(debuggerUrl);
+            InterceptorRegistry.Remove(targetId);
         }
     }
 
@@ -79,9 +77,9 @@ internal sealed class TargetWatcher
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(3));
-        using var response = await httpClient.GetAsync($"http://127.0.0.1:{port}/json", timeout.Token);
-        response.EnsureSuccessStatusCode();
-        using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-        return await JsonSerializer.DeserializeAsync<List<DebugTarget>>(stream, AppJson.Options, timeout.Token) ?? [];
+        var reply = await connection.SendAsync("Target.getTargets", cancellationToken: timeout.Token);
+        return reply.TryGetProperty("targetInfos", out var targetInfos)
+            ? targetInfos.Deserialize<List<DebugTarget>>(AppJson.Options) ?? []
+            : [];
     }
 }

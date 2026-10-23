@@ -125,9 +125,6 @@ internal static class AppIconHelper
     private static nint appIconHandle = nint.Zero;
     public static Process? EdgeProcess { get; set; }
 
-    /// <summary>The port the dedicated browser was asked to expose DevTools on.</summary>
-    public static int DebugPort { get; set; }
-
     private static bool ConvertPngToIco(string pngPath, string targetIcoPath)
     {
         try
@@ -330,7 +327,7 @@ internal static class AppIconHelper
                 {
                     var cmdLine = cmdProc.StandardOutput.ReadToEnd();
                     cmdProc.WaitForExit(1000);
-                    if (cmdLine.Contains($"--remote-debugging-port={DebugPort}", StringComparison.Ordinal) || cmdLine.Contains("PrimeVideoSpeedController"))
+                    if (cmdLine.Contains("--remote-debugging-pipe", StringComparison.Ordinal) || cmdLine.Contains("PrimeVideoSpeedController"))
                     {
                         verified = true;
                     }

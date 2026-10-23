@@ -1,25 +1,29 @@
 // End-to-end check of the real desktop helper. Manual: it needs internet access
-// and opens a visible Edge window on www.primevideo.com for a few seconds.
+// and opens a visible Edge window on www.primevideo.com.
 //
 //   dotnet build -c Release
 //   node PrimeVideoSpeedApp.Tests/helper-e2e.js [path-to-PrimeVideoSpeedApp.dll-or-exe]
 //
 // The helper runs with PVSC_DATA_DIR pointing at a throwaway folder, so it never
-// touches the real profile, session or Start Menu entry. What it proves, on the
-// real binary against the real site:
-//   * with port 9223 taken, the helper picks another port and still works;
-//   * the controller is injected into the Prime Video tab, and again after a reload;
-//   * killing the helper takes the browser (and its debugging endpoint) with it.
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import net from "node:net";
+// touches the real profile, session or Start Menu entry. The helper no longer
+// opens a debugging port, so nothing here attaches to the browser. Instead it
+// checks the transport from outside, on the real binary against the real site:
+//   * the browser was started with --remote-debugging-pipe and no --remote-debugging-port;
+//   * no process of that browser listens on a TCP socket, so no other program can reach it;
+//   * the helper stays up through the page load, which its DevTools conversation must allow;
+//   * killing only the helper takes every browser process for that data folder with it.
+// Injecting the controller is covered by the integration tests, which drive the
+// same pipe transport against a headless Edge.
+import { execFile, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
+const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const version = /const VERSION = "([^"]+)"/.exec(readFileSync(join(root, "speed-control.js"), "utf8"))?.[1];
 const target = process.argv[2] ?? join(root, "bin", "Release", "net8.0", "PrimeVideoSpeedApp.dll");
 if (!existsSync(target)) throw new Error(`Nothing to run at ${target}; build it first.`);
 
@@ -28,20 +32,35 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 async function waitFor(fn, what, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = await fn();
-    if (value) return value;
+    if (await fn()) return;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}.`);
     await sleep(250);
   }
 }
 
-// Hold the helper's preferred port, as some other program might.
-const squatter = net.createServer();
-const squatting = await new Promise((resolve) => {
-  squatter.once("error", () => resolve(false));
-  squatter.listen(9223, "127.0.0.1", () => resolve(true));
-});
-console.log(squatting ? "holding port 9223 to force the fallback" : "port 9223 was already taken by someone else");
+async function powershellJson(script) {
+  const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-Command", script]);
+  const text = stdout.trim();
+  if (!text) return [];
+  const parsed = JSON.parse(text);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+// Every msedge.exe running on this data folder: the browser and its child processes.
+function browserProcesses(dataDir) {
+  const folder = dataDir.replace(/'/g, "''");
+  return powershellJson(
+    `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*${folder}*' } | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`,
+  );
+}
+
+// Get-NetTCPConnection reports "no matches" as an error, which here means no
+// listeners; the explicit exit keeps that caught error from failing the command.
+function listeningSockets(processIds) {
+  return powershellJson(
+    `try { Get-NetTCPConnection -State Listen -OwningProcess ${processIds.join(",")} -ErrorAction Stop | Select-Object OwningProcess,LocalPort | ConvertTo-Json -Compress } catch { }; exit 0`,
+  );
+}
 
 const dataDir = mkdtempSync(join(tmpdir(), "pvsc-e2e-"));
 const command = target.endsWith(".dll") ? ["dotnet", [target]] : [target, []];
@@ -52,79 +71,44 @@ helper.stderr.on("data", (chunk) => { output += chunk; });
 
 let failed = false;
 try {
-  // The helper names the port only when it had to leave the preferred one; an
-  // explicit port is not written to DevToolsActivePort, which is for port 0.
-  const port = await waitFor(() => {
-    const changed = /using port (\d+) instead/.exec(output);
-    if (changed) return Number(changed[1]);
-    return squatting ? 0 : 9223;
-  }, "the helper to choose a port");
-  console.log(`the helper chose port ${port}`);
-  if (squatting) check(port !== 9223, "the helper used the port another program was holding");
+  await waitFor(async () => (await browserProcesses(dataDir)).length > 0, "the browser to start", 90000);
+  const processes = await browserProcesses(dataDir);
+  const main = processes.find((proc) => !(proc.CommandLine ?? "").includes("--type="));
+  check(main, "no browser process without a --type= argument was found");
+  check(main.CommandLine.includes("--remote-debugging-pipe"), "the browser was not started with --remote-debugging-pipe");
+  check(!main.CommandLine.includes("--remote-debugging-port"), "the browser was started with --remote-debugging-port");
+  console.log(`PASS the browser (${processes.length} processes) was started with --remote-debugging-pipe and no debugging port`);
 
-  const tab = await waitFor(async () => {
-    try {
-      const list = await fetch(`http://127.0.0.1:${port}/json`).then((response) => response.json());
-      return list.find((candidate) => candidate.type === "page" && /primevideo\.com/.test(candidate.url));
-    } catch {
-      return null;
-    }
-  }, "a Prime Video tab");
-  console.log(`tab: ${tab.url}`);
+  // Time for the Prime Video page to load while the helper is running.
+  await sleep(15000);
+  check(helper.exitCode === null, `the helper exited with code ${helper.exitCode}`);
+  console.log("PASS the helper is still running after 15 seconds");
 
-  const socket = new WebSocket(tab.webSocketDebuggerUrl);
-  const pending = new Map();
-  let nextId = 1;
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    const request = pending.get(message.id);
-    if (!request) return;
-    pending.delete(message.id);
-    if (message.error) request.reject(new Error(message.error.message)); else request.resolve(message.result);
-  });
-  await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = nextId++;
-    pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-  const evaluate = async (expression) => (await send("Runtime.evaluate", { expression, returnByValue: true })).result.value;
-  const installed = async () => {
-    try {
-      return (await evaluate("window.__primeVideoSpeedControl?.installed ? window.__primeVideoSpeedControl.version : null")) === version;
-    } catch {
-      return false;
-    }
-  };
+  // Sampled several times, since a socket opened later would otherwise be missed.
+  for (let sample = 0; sample < 4; sample++) {
+    const ids = (await browserProcesses(dataDir)).map((proc) => proc.ProcessId);
+    check(ids.length > 0, "the browser exited during the socket check");
+    const listening = await listeningSockets(ids);
+    check(listening.length === 0, `browser processes are listening on TCP: ${JSON.stringify(listening)}`);
+    await sleep(2500);
+  }
+  console.log("PASS no browser process listens on a TCP port (checked over about 10 seconds)");
 
-  await waitFor(installed, "the controller to be injected");
-  console.log(`PASS the controller ${version} was injected into the real Prime Video page`);
-
-  await evaluate("window.__e2eMarker = 1");
-  await send("Page.reload");
-  await waitFor(async () => (await evaluate("typeof window.__e2eMarker")) === "undefined" && (await installed()), "the controller after a reload");
-  console.log("PASS the controller was injected again after the page reloaded");
-  socket.close();
-
-  // Kill only the helper: the browser must go because the job object closes, not
-  // because something walked the process tree.
+  // Only the helper is killed. The browser must go because its job object closes,
+  // not because this script walked the process tree.
   helper.kill();
-  await waitFor(async () => {
-    try {
-      await fetch(`http://127.0.0.1:${port}/json/version`);
-      return false;
-    } catch {
-      return true;
-    }
-  }, "the browser to go away with the helper", 20000);
-  console.log("PASS the browser and its debugging endpoint ended with the helper");
+  await waitFor(async () => (await browserProcesses(dataDir)).length === 0, "the browser to go away with the helper", 20000);
+  console.log("PASS the browser ended with the helper");
 } catch (error) {
   failed = true;
   console.error(`FAIL ${error.message}`);
   console.error(`--- helper output ---\n${output}`);
 } finally {
-  squatter.close();
   if (helper.exitCode === null) helper.kill();
+  // Anything a failed run left behind would otherwise keep the profile locked.
+  for (const proc of await browserProcesses(dataDir).catch(() => [])) {
+    try { process.kill(proc.ProcessId); } catch { /* already gone */ }
+  }
   await sleep(1500);
   try {
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });

@@ -133,15 +133,42 @@ bool isTelemetryRequest(String host, String path) {
   return _isFirstParty(host) && _telemetryPathFragments.any(path.contains);
 }
 
-/// Hosts that make up Prime Video and Amazon's sign-in: `primevideo.com` and
-/// `amazon` under any country suffix (`amazon.com`, `amazon.de`, `amazon.co.uk`,
-/// `amazon.com.tr`, `amazon.ae`, ...). A pattern rather than a list, because a
-/// marketplace missing from a list would lock its customers out of signing in.
-final _amazonHost = RegExp(r'(^|\.)amazon\.(?:[a-z]{2,3}|com?\.[a-z]{2})$');
+/// Amazon's retail marketplaces. An explicit list rather than a pattern over any
+/// `amazon.<tld>`: a pattern also accepted domains Amazon does not own, which
+/// would then load chrome-less in the app and be eligible for the DRM permission.
+/// A marketplace missing from this list locks its customers out of signing in,
+/// so add new marketplaces here.
+const _amazonMarketplaces = [
+  'amazon.com',
+  'amazon.ca',
+  'amazon.com.mx',
+  'amazon.com.br',
+  'amazon.co.uk',
+  'amazon.de',
+  'amazon.fr',
+  'amazon.it',
+  'amazon.es',
+  'amazon.nl',
+  'amazon.se',
+  'amazon.pl',
+  'amazon.com.be',
+  'amazon.ie',
+  'amazon.com.tr',
+  'amazon.ae',
+  'amazon.sa',
+  'amazon.eg',
+  'amazon.in',
+  'amazon.co.jp',
+  'amazon.sg',
+  'amazon.com.au',
+  'amazon.cn',
+  'amazon.co.za',
+];
 
 /// Whether [host] (lower-case) is Prime Video or Amazon itself.
 bool isFirstPartyHost(String host) =>
-    _matchesSuffix(host, 'primevideo.com') || _amazonHost.hasMatch(host);
+    _matchesSuffix(host, 'primevideo.com') ||
+    _amazonMarketplaces.any((domain) => _matchesSuffix(host, domain));
 
 /// Whether the WebView may load [uri] as the page it is showing.
 ///

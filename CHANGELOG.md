@@ -2,6 +2,13 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
+## Unreleased
+
+- **Desktop: the browser no longer opens a debugging port.** The helper starts Edge with `--remote-debugging-pipe`, so its DevTools connection runs over a private pipe that only the browser it launched can use. The old endpoint on `127.0.0.1` (port 9223, or a free port) had no authentication, so any process on the machine, including one from another Windows account, could control the signed-in browser. With no port there is nothing to be busy, so the port setting and fallback are gone. If Edge relaunches itself (for example to finish an update), the relaunched browser has no pipe, so the helper exits and the Prime Video window closes; start the app again.
+- Android: the build toolchain moves to Gradle 8.14.6, with security fixes.
+- Android: the app now only trusts Amazon's own marketplace domains, instead of any `amazon.<suffix>` domain.
+- **Release signing needs approval.** The Android signing secrets are held by a protected `release` environment, so a release build waits for a maintainer's approval before it can read them. CI actions are pinned to commit SHAs.
+
 ## 3.8.0 — 2026-09-29
 
 - **Each title remembers its own speed.** A title reopens at the speed you last set on it, whether you come back to it inside the app or after a restart; a title you have not set a speed on opens at the speed you were using, as before. The last 100 titles are kept. Titles are told apart by the id in the page address, so an episode that Prime Video gives an address of its own counts as its own title.

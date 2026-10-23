@@ -50,6 +50,9 @@ void main() {
       expect(allowed('https://www.amazon.com.tr/gp/video/storefront'), isTrue);
       expect(allowed('https://www.amazon.com.au/'), isTrue);
       expect(allowed('https://www.amazon.ae/'), isTrue);
+      expect(allowed('https://www.amazon.pl/'), isTrue);
+      expect(allowed('https://www.amazon.co.za/'), isTrue);
+      expect(allowed('https://www.amazon.sa/'), isTrue);
       expect(allowed('https://na.account.amazon.com/ap/mfa'), isTrue);
       expect(allowed('http://www.amazon.com/'), isTrue);
       expect(allowed('about:blank'), isTrue);
@@ -61,6 +64,10 @@ void main() {
       expect(allowed('https://amazon.com.evil.example/'), isFalse);
       expect(allowed('https://notamazon.com/'), isFalse);
       expect(allowed('https://amazon.evil.com/'), isFalse);
+      expect(allowed('https://amazon.xyz/'), isFalse);
+      expect(allowed('https://www.amazon.biz/'), isFalse);
+      expect(allowed('https://amazon.co.zz/'), isFalse);
+      expect(allowed('https://amazon.com.zz/'), isFalse);
       expect(allowed('https://www.amazon-adsystem.com/'), isFalse);
       expect(allowed('https://evil.example/?next=https://www.primevideo.com/'), isFalse);
       expect(allowed('http://evil.example/'), isFalse);
@@ -84,6 +91,7 @@ void main() {
   test('isFirstPartyHost matches the hosts that may hold the DRM permission', () {
     expect(isFirstPartyHost('www.primevideo.com'), isTrue);
     expect(isFirstPartyHost('www.amazon.de'), isTrue);
+    expect(isFirstPartyHost('www.amazon.xyz'), isFalse);
     expect(isFirstPartyHost('m.media-amazon.com'), isFalse);
     expect(isFirstPartyHost('primevideo.com.example'), isFalse);
     expect(isFirstPartyHost(''), isFalse);

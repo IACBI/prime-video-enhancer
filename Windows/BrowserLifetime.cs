@@ -5,12 +5,11 @@ using System.Runtime.InteropServices;
 /// Ties the dedicated browser to this helper's own lifetime.
 /// </summary>
 /// <remarks>
-/// The browser exposes an unauthenticated DevTools endpoint on loopback, which
-/// any process on the machine can drive - including processes of other OS users,
-/// against whom the profile directory on disk is ACL-protected but the port is
-/// not. Left to itself the browser outlives the helper (the documented shutdown
-/// is "close this console window"), so the endpoint would keep serving the
-/// signed-in profile with nothing left that needs it.
+/// The browser must not outlive the helper. Its profile is signed in, and the
+/// documented shutdown is "close this console window"; left to itself the browser
+/// would keep running with nothing left to drive it. It is placed in the job
+/// before its first thread runs (see <see cref="PipeBrowser.Launch"/>), so the
+/// processes it starts afterwards join the job as well.
 ///
 /// A job object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is used rather than an
 /// exit handler because the kernel closes the job handle however the helper
