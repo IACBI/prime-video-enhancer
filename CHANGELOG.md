@@ -2,6 +2,10 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
+## Unreleased
+
+- **Android releases are signed with a stable release key.** From this release on, an update installs over the previous version and keeps you signed in. Moving here from 3.8.0 or earlier needs one last uninstall. [SECURITY.md](SECURITY.md) lists the certificate to check the APK against.
+
 ## 3.8.0 — 2026-10-23
 
 - **Desktop: the browser no longer opens a debugging port.** The helper starts Edge with `--remote-debugging-pipe`, so its DevTools connection runs over a private pipe that only the browser it launched can use. The old endpoint on `127.0.0.1:9223` had no authentication, so any process on the machine, including one from another Windows account, could control the signed-in browser. If Edge relaunches itself (for example to finish an update), the relaunched browser has no pipe, so the helper exits and the Prime Video window closes; start the app again.
