@@ -33,14 +33,16 @@ Include:
 - The Flutter app applies request filtering only inside its embedded WebView.
 - The WebView only navigates to `primevideo.com` and Amazon pages; a link to anywhere else is refused, and only those sites can receive the protected-media (DRM) permission. The app has no address bar, so a page from elsewhere would otherwise look exactly like Prime Video.
 - It does not configure a device-wide proxy, VPN, root certificate, or HTTPS interception service.
-- Release APKs are not yet signed with a stable release key. Releases from `v3.6.6` on, `v3.8.0` included, are signed with a throwaway debug key generated for each build, so each one has a different certificate: it cannot be installed over the one before it, and updating means uninstalling first, which clears the app's stored session. Check every download against `SHA256SUMS.txt` on the release page.
-- Once a release key is configured, releases are signed with it automatically, and each later release can be checked against the one before it:
+- Release APKs after `v3.8.0` are signed with a stable release key. Before installing, check the download against `SHA256SUMS.txt` on the release page, and confirm the signing certificate:
 
   ```
   apksigner verify --print-certs PrimeVideoSpeedApp-Mobile.apk
   ```
 
-- The release signing key, once configured, is held in a protected GitHub Environment named `release`. The Android release job runs in that environment, so its signing secrets are released only to a run a maintainer has approved. `main` cannot be force-pushed or deleted, and only repository administrators can create, move or delete `v*` tags.
+  The certificate's SHA-256 digest must be `6a79e8fd40a3dec29b2111ac3f354b47583179b45fc3dc376252b1b8d758f364`.
+
+  Releases `v3.6.6` through `v3.8.0` were signed with throwaway debug keys and cannot be verified this way; installing a later, properly signed release over one of them requires uninstalling it first, which clears the app's stored session.
+- The release signing key is held in a protected GitHub Environment named `release`. The Android release job runs in that environment, so its signing secrets are released only to a run a maintainer has approved. `main` cannot be force-pushed or deleted, and only repository administrators can create, move or delete `v*` tags.
 
 ### Privacy boundaries
 
