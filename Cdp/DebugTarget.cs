@@ -8,9 +8,10 @@ internal static class AppJson
     };
 }
 
+/// <summary>One entry of <c>Target.getTargets</c>.</summary>
 internal sealed class DebugTarget
 {
+    public string TargetId { get; set; } = "";
     public string Type { get; set; } = "";
     public string Url { get; set; } = "";
-    public string? WebSocketDebuggerUrl { get; set; }
 }

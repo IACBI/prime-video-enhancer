@@ -1,3 +1,8 @@
+using System.IO.Pipes;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Channels;
+
 Func<Task> Sync(Action test) => () =>
 {
     test();
@@ -7,7 +12,6 @@ Func<Task> Sync(Action test) => () =>
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("Prime Video target matching", Sync(TestPrimeVideoTargets)),
-    ("DevTools URL must be the local endpoint", Sync(TestDebuggerUrlMustBeLocal)),
     ("Ad request classification", Sync(TestAdRequestClassification)),
     ("Safe block pattern deduplication", Sync(TestSafeBlockPatternDeduplication)),
     ("Every paused host pattern is classified", Sync(TestPausedPatternsAreClassified)),
@@ -18,7 +22,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Subtitle selector isolation", Sync(TestSubtitleSelectorIsolation)),
     ("Injection script version consistency", Sync(TestScriptVersionConsistency)),
     ("Mobile asset matches root script", Sync(TestMobileAssetMatchesRootScript)),
-    ("Debug port avoids busy ports", Sync(IntegrationTests.TestDebugPortAvoidsBusyPorts)),
+    ("DevTools pipe framing and session routing", TestPipeFramingAndSessionRouting),
     // The rest drive a real headless browser and are skipped where none is installed.
     ("Session injects the controller and follows navigation", IntegrationTests.TestSessionInjectsAndFollowsNavigation),
     ("Session restores a wiped controller", IntegrationTests.TestSessionRestoresAWipedController),
@@ -65,31 +69,6 @@ static void TestPrimeVideoTargets()
     AssertFalse(IsTarget("page", "https://example.test/?next=https://primevideo.com/"));
     AssertFalse(IsTarget("page", "https://www.amazon.com/gp/videos-not-prime"));
     AssertFalse(IsTarget("page", "not-a-url"));
-}
-
-// Another process squatting on the debugging port could otherwise name any
-// WebSocket address in its target list and have the helper connect to it.
-static void TestDebuggerUrlMustBeLocal()
-{
-    const int port = 9223;
-    string? Resolve(string? url) =>
-        PrimeVideoTargetMatcher.TryGetLocalDebuggerUrl(new DebugTarget { WebSocketDebuggerUrl = url }, port);
-
-    const string real = "ws://127.0.0.1:9223/devtools/page/60108750D2DF8926B67C77127EF9BED8";
-    AssertEqual(real, Resolve(real));
-    AssertEqual("ws://localhost:9223/devtools/page/ABC", Resolve("ws://localhost:9223/devtools/page/ABC"));
-    AssertEqual("ws://[::1]:9223/devtools/page/ABC", Resolve("ws://[::1]:9223/devtools/page/ABC"));
-
-    AssertTrue(Resolve(null) is null);
-    AssertTrue(Resolve("") is null);
-    AssertTrue(Resolve("not-a-url") is null);
-    AssertTrue(Resolve("ws://evil.example:9223/devtools/page/ABC") is null);
-    AssertTrue(Resolve("ws://127.0.0.1.evil.example:9223/devtools/page/ABC") is null);
-    AssertTrue(Resolve("ws://192.168.1.5:9223/devtools/page/ABC") is null);
-    AssertTrue(Resolve("ws://127.0.0.1:9224/devtools/page/ABC") is null);
-    AssertTrue(Resolve("ws://127.0.0.1/devtools/page/ABC") is null);
-    AssertTrue(Resolve("wss://127.0.0.1:9223/devtools/page/ABC") is null);
-    AssertTrue(Resolve("http://127.0.0.1:9223/devtools/page/ABC") is null);
 }
 
 static void TestAdRequestClassification()
@@ -307,5 +286,245 @@ static void AssertEqual<T>(T expected, T actual)
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
     {
         throw new InvalidOperationException($"Expected '{expected}', received '{actual}'.");
+    }
+}
+
+// The browser's end of the pipe is faked, so framing and routing are checked
+// without Edge: replies split across writes, several packed into one, and
+// messages carrying a session id reaching that session and nothing else.
+static async Task TestPipeFramingAndSessionRouting()
+{
+    await TestBrowserRepliesRouteById();
+    await TestRepliesAreFramedAcrossWrites();
+    await TestAttachedSessionIsRouted();
+    await TestClosedPipeFailsPendingCalls();
+}
+
+static async Task TestBrowserRepliesRouteById()
+{
+    await using var rig = new PipeRig();
+    var targets = rig.Connection.SendAsync("Target.getTargets");
+    var version = rig.Connection.SendAsync("Browser.getVersion");
+    var ids = await ReadIdsAsync(rig.Fake, 2);
+
+    // Answered out of order: each call must get the reply with its own id.
+    await rig.Fake.ReplyAsync(ids["Browser.getVersion"], "{\"product\":\"Fake/1.0\"}");
+    await rig.Fake.ReplyAsync(ids["Target.getTargets"], "{\"targetInfos\":[]}");
+
+    AssertEqual("Fake/1.0", (await version.WaitAsync(FakeBrowser.Patience)).GetProperty("product").GetString());
+    AssertTrue((await targets.WaitAsync(FakeBrowser.Patience)).TryGetProperty("targetInfos", out _));
+}
+
+static async Task TestRepliesAreFramedAcrossWrites()
+{
+    await using var rig = new PipeRig();
+
+    var split = rig.Connection.SendAsync("Browser.getVersion");
+    var splitId = Parse(await rig.Fake.NextAsync()).GetProperty("id").GetInt32();
+    var reply = Encoding.UTF8.GetBytes($"{{\"id\":{splitId},\"result\":{{\"product\":\"Split/1.0\"}}}}\0");
+    var cut = reply.Length / 2;
+    await rig.Fake.WriteRawAsync(reply[..cut]);
+    await Task.Delay(100);
+    await rig.Fake.WriteRawAsync(reply[cut..]);
+    AssertEqual("Split/1.0", (await split.WaitAsync(FakeBrowser.Patience)).GetProperty("product").GetString());
+
+    var targets = rig.Connection.SendAsync("Target.getTargets");
+    var version = rig.Connection.SendAsync("Browser.getVersion");
+    var ids = await ReadIdsAsync(rig.Fake, 2);
+    var packed = Encoding.UTF8.GetBytes(
+        $"{{\"id\":{ids["Target.getTargets"]},\"result\":{{\"targetInfos\":[]}}}}\0" +
+        $"{{\"id\":{ids["Browser.getVersion"]},\"result\":{{\"product\":\"Packed/1.0\"}}}}\0");
+    await rig.Fake.WriteRawAsync(packed);
+
+    AssertTrue((await targets.WaitAsync(FakeBrowser.Patience)).TryGetProperty("targetInfos", out _));
+    AssertEqual("Packed/1.0", (await version.WaitAsync(FakeBrowser.Patience)).GetProperty("product").GetString());
+}
+
+static async Task TestAttachedSessionIsRouted()
+{
+    await using var rig = new PipeRig();
+
+    var attach = rig.Connection.AttachAsync("T1");
+    var attachRequest = Parse(await rig.Fake.NextAsync());
+    AssertEqual("Target.attachToTarget", attachRequest.GetProperty("method").GetString());
+    AssertEqual("T1", attachRequest.GetProperty("params").GetProperty("targetId").GetString());
+    AssertTrue(attachRequest.GetProperty("params").GetProperty("flatten").GetBoolean());
+    await rig.Fake.ReplyAsync(attachRequest.GetProperty("id").GetInt32(), "{\"sessionId\":\"S1\"}");
+    var session = await attach.WaitAsync(FakeBrowser.Patience);
+
+    // The session's message reuses the id of a pending browser command. It must
+    // reach the session, and must not complete the command.
+    var browserCall = rig.Connection.SendAsync("Browser.getVersion");
+    var browserId = Parse(await rig.Fake.NextAsync()).GetProperty("id").GetInt32();
+    await rig.Fake.WriteAsync($"{{\"sessionId\":\"S1\",\"id\":{browserId},\"result\":{{\"fromSession\":true}}}}");
+    var delivered = Parse((await session.ReceiveAsync().WaitAsync(FakeBrowser.Patience))!);
+    AssertEqual("S1", delivered.GetProperty("sessionId").GetString());
+    AssertTrue(delivered.GetProperty("result").GetProperty("fromSession").GetBoolean());
+    AssertFalse(browserCall.IsCompleted);
+
+    await rig.Fake.ReplyAsync(browserId, "{\"product\":\"Browser/1.0\"}");
+    AssertEqual("Browser/1.0", (await browserCall.WaitAsync(FakeBrowser.Patience)).GetProperty("product").GetString());
+
+    var sending = session.SendAsync(Encoding.UTF8.GetBytes("{\"id\":7,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"1+1\"}}"));
+    var sent = await rig.Fake.NextAsync();
+    AssertTrue(sent.StartsWith("{\"sessionId\":\"S1\",", StringComparison.Ordinal));
+    var sentRoot = Parse(sent);
+    AssertEqual(7, sentRoot.GetProperty("id").GetInt32());
+    AssertEqual("Runtime.evaluate", sentRoot.GetProperty("method").GetString());
+    AssertEqual("1+1", sentRoot.GetProperty("params").GetProperty("expression").GetString());
+    await sending.WaitAsync(FakeBrowser.Patience);
+
+    // The browser ends the session: its receive side finishes, and disposing it
+    // detaches with a browser-level request.
+    await rig.Fake.WriteAsync("{\"method\":\"Target.detachedFromTarget\",\"params\":{\"sessionId\":\"S1\"}}");
+    AssertTrue(await session.ReceiveAsync().WaitAsync(FakeBrowser.Patience) is null);
+
+    var detaching = session.DisposeAsync().AsTask();
+    var detach = Parse(await rig.Fake.NextAsync());
+    AssertEqual("Target.detachFromTarget", detach.GetProperty("method").GetString());
+    AssertEqual("S1", detach.GetProperty("params").GetProperty("sessionId").GetString());
+    await rig.Fake.ReplyAsync(detach.GetProperty("id").GetInt32(), "{}");
+    await detaching.WaitAsync(FakeBrowser.Patience);
+}
+
+static async Task TestClosedPipeFailsPendingCalls()
+{
+    await using var rig = new PipeRig();
+    var pending = rig.Connection.SendAsync("Browser.getVersion");
+    _ = await rig.Fake.NextAsync();
+
+    rig.Fake.CloseOutput();
+    await rig.Connection.Completion.WaitAsync(FakeBrowser.Patience);
+
+    await AssertFailsWithIOExceptionAsync(() => pending);
+    await AssertFailsWithIOExceptionAsync(() => rig.Connection.SendAsync("Browser.getVersion"));
+}
+
+static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement;
+
+static async Task<Dictionary<string, int>> ReadIdsAsync(FakeBrowser fake, int count)
+{
+    var ids = new Dictionary<string, int>();
+    for (var i = 0; i < count; i++)
+    {
+        var request = Parse(await fake.NextAsync());
+        ids[request.GetProperty("method").GetString()!] = request.GetProperty("id").GetInt32();
+    }
+
+    return ids;
+}
+
+static async Task AssertFailsWithIOExceptionAsync(Func<Task> call)
+{
+    try
+    {
+        await call().WaitAsync(FakeBrowser.Patience);
+    }
+    catch (IOException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException("Expected an IOException, but the call completed.");
+}
+
+/// <summary>A CdpConnection wired to a FakeBrowser through two anonymous pipes.</summary>
+internal sealed class PipeRig : IAsyncDisposable
+{
+    private readonly AnonymousPipeServerStream toHelper = new(PipeDirection.Out);
+    private readonly AnonymousPipeServerStream fromHelper = new(PipeDirection.In);
+
+    public PipeRig()
+    {
+        // The client ends stay open for the lifetime of the rig; each stream
+        // disposes its own end when the connection and fake are disposed.
+        Connection = new CdpConnection(
+            input: new AnonymousPipeClientStream(PipeDirection.In, toHelper.ClientSafePipeHandle),
+            output: new AnonymousPipeClientStream(PipeDirection.Out, fromHelper.ClientSafePipeHandle));
+        Fake = new FakeBrowser(input: fromHelper, output: toHelper);
+    }
+
+    public CdpConnection Connection { get; }
+
+    public FakeBrowser Fake { get; }
+
+    public async ValueTask DisposeAsync()
+    {
+        // The fake goes first: its end of the pipe closing is what lets the
+        // connection's read loop finish.
+        await Fake.DisposeAsync();
+        await Connection.DisposeAsync();
+    }
+}
+
+/// <summary>The browser's side of the pipe: records what the helper writes and writes what a test asks for.</summary>
+internal sealed class FakeBrowser : IAsyncDisposable
+{
+    public static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
+
+    private readonly Stream input;
+    private readonly Stream output;
+    private readonly Channel<string> requests = Channel.CreateUnbounded<string>();
+    private readonly Task reader;
+
+    public FakeBrowser(Stream input, Stream output)
+    {
+        this.input = input;
+        this.output = output;
+        reader = Task.Run(ReadRequestsAsync);
+    }
+
+    /// <summary>The next message the helper wrote, without its NUL terminator.</summary>
+    public Task<string> NextAsync() => requests.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+
+    public Task ReplyAsync(int id, string resultJson) => WriteAsync($"{{\"id\":{id},\"result\":{resultJson}}}");
+
+    public Task WriteAsync(string json) => WriteRawAsync(Encoding.UTF8.GetBytes(json + "\0"));
+
+    public async Task WriteRawAsync(byte[] bytes)
+    {
+        await output.WriteAsync(bytes);
+        await output.FlushAsync();
+    }
+
+    public void CloseOutput() => output.Dispose();
+
+    private async Task ReadRequestsAsync()
+    {
+        var buffer = new byte[4096];
+        var message = new List<byte>();
+        try
+        {
+            int read;
+            while ((read = await input.ReadAsync(buffer)) > 0)
+            {
+                for (var i = 0; i < read; i++)
+                {
+                    if (buffer[i] == 0)
+                    {
+                        requests.Writer.TryWrite(Encoding.UTF8.GetString(message.ToArray()));
+                        message.Clear();
+                    }
+                    else
+                    {
+                        message.Add(buffer[i]);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            requests.Writer.TryComplete();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        output.Dispose();
+        await Task.WhenAny(reader, Task.Delay(2000));
+        input.Dispose();
     }
 }

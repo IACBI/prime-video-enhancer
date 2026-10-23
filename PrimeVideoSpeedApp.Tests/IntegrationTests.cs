@@ -1,6 +1,3 @@
-using System.Net;
-using System.Net.Sockets;
-using System.Net.WebSockets;
 using System.Text.Json;
 
 internal sealed class SkipTestException(string reason) : Exception(reason);
@@ -60,29 +57,9 @@ internal static class IntegrationTests
         {
             await session;
         }
-        catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or IOException)
+        catch (Exception ex) when (ex is OperationCanceledException or IOException)
         {
         }
-    }
-
-    public static void TestDebugPortAvoidsBusyPorts()
-    {
-        var busy = new TcpListener(IPAddress.Loopback, 0);
-        busy.Start();
-        var port = ((IPEndPoint)busy.LocalEndpoint).Port;
-        try
-        {
-            Check(!DebugPort.IsFree(port), "a port with a listener was reported free");
-            var chosen = DebugPort.Choose(port);
-            Check(chosen != port && chosen > 0, "a busy preferred port was returned");
-            Check(DebugPort.IsFree(chosen), "the substitute port is not free");
-        }
-        finally
-        {
-            busy.Stop();
-        }
-
-        Check(DebugPort.Choose(port) == port, "a free preferred port was not kept");
     }
 
     public static async Task TestSessionInjectsAndFollowsNavigation()
@@ -90,8 +67,9 @@ internal static class IntegrationTests
         var browser = await BrowserAsync();
         using var server = new FixtureServer();
         await using var tab = await browser.NewTabAsync();
+        await using var channel = await browser.AttachAsync(tab.TargetId);
         using var cancellation = new CancellationTokenSource();
-        var session = TargetSession.RunAsync(tab.WebSocketUrl, "about:blank", Options(server.BaseUrl), cancellation.Token);
+        var session = TargetSession.RunAsync(channel, "about:blank", Options(server.BaseUrl), cancellation.Token);
         try
         {
             // The safety check is minutes away, so everything below is the
@@ -124,10 +102,11 @@ internal static class IntegrationTests
         var browser = await BrowserAsync();
         using var server = new FixtureServer();
         await using var tab = await browser.NewTabAsync(server.BaseUrl + "/video/wipe");
+        await using var channel = await browser.AttachAsync(tab.TargetId);
         using var cancellation = new CancellationTokenSource();
         // The session starts on an already-loaded page, so the first check is what
         // installs the controller, and the short interval is what repairs it.
-        var session = TargetSession.RunAsync(tab.WebSocketUrl, server.BaseUrl + "/video/wipe", Options(server.BaseUrl, TimeSpan.FromMilliseconds(400)), cancellation.Token);
+        var session = TargetSession.RunAsync(channel, server.BaseUrl + "/video/wipe", Options(server.BaseUrl, TimeSpan.FromMilliseconds(400)), cancellation.Token);
         try
         {
             await WaitForControllerAsync(tab);
@@ -146,6 +125,7 @@ internal static class IntegrationTests
         var browser = await BrowserAsync();
         using var server = new FixtureServer();
         await using var tab = await browser.NewTabAsync();
+        await using var channel = await browser.AttachAsync(tab.TargetId);
         using var cancellation = new CancellationTokenSource();
         var options = new TargetSessionOptions
         {
@@ -156,7 +136,7 @@ internal static class IntegrationTests
                 : url.Contains("/blocked/") ? AdRequestAction.Block
                 : AdRequestAction.Continue
         };
-        var session = TargetSession.RunAsync(tab.WebSocketUrl, "about:blank", options, cancellation.Token);
+        var session = TargetSession.RunAsync(channel, "about:blank", options, cancellation.Token);
         try
         {
             // Give the session time to switch interception on before the page asks.
@@ -190,7 +170,7 @@ internal static class IntegrationTests
     {
         var browser = await BrowserAsync();
         using var server = new FixtureServer();
-        var watcher = new TargetWatcher(browser.Http, browser.Port, Options(server.BaseUrl));
+        var watcher = new TargetWatcher(browser.Connection, Options(server.BaseUrl));
 
         await using var matching = await browser.NewTabAsync(server.BaseUrl + "/video/watched");
         await using var other = await browser.NewTabAsync(server.BaseUrl + "/elsewhere");
@@ -204,7 +184,7 @@ internal static class IntegrationTests
         await WaitForControllerAsync(matching);
         Check(await other.Client.EvaluateAsync("typeof window.__primeVideoSpeedControl") == "undefined", "a tab that is not Prime Video was given the controller");
 
-        await browser.CloseTabAsync(matching.Id);
+        await browser.CloseTabAsync(matching.TargetId);
         await TestWait.UntilAsync(() => Task.FromResult(watcher.RunningSessions == 0), "the session to end with its tab", 8000);
     }
 }

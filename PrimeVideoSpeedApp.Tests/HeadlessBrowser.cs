@@ -1,41 +1,48 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
+// PipeBrowser is Windows-only. Nothing here runs elsewhere: FindExecutable returns
+// null off Windows, and that null is what makes the integration tests skip.
+#pragma warning disable CA1416
+
 /// <summary>
 /// A real headless Edge (or another Chromium, via PVSC_BROWSER) on a throwaway
-/// profile, for tests that need the actual DevTools protocol rather than a stand-in.
+/// profile, driven over the same pipe transport the helper uses, for tests that
+/// need the actual DevTools protocol rather than a stand-in.
 /// </summary>
 internal sealed class HeadlessBrowser : IAsyncDisposable
 {
-    private readonly string profileDirectory;
-    private readonly HttpClient http = new(new SocketsHttpHandler { UseProxy = false });
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan ExitTimeout = TimeSpan.FromSeconds(10);
 
-    private HeadlessBrowser(string profileDirectory, int port)
+    private readonly string profileDirectory;
+    private readonly PipeBrowser browser;
+
+    private HeadlessBrowser(string profileDirectory, PipeBrowser browser)
     {
         this.profileDirectory = profileDirectory;
-        Port = port;
+        this.browser = browser;
     }
 
-    public int Port { get; }
+    public CdpConnection Connection => browser.Connection;
 
-    public HttpClient Http => http;
+    public Process Process => browser.Process;
 
     public static string? FindExecutable()
     {
+        // PipeBrowser hands the pipe to the browser through CreateProcess, so off Windows there is nothing to start.
+        if (!OperatingSystem.IsWindows()) return null;
+
         string?[] candidates =
         [
             Environment.GetEnvironmentVariable("PVSC_BROWSER"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft", "Edge", "Application", "msedge.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft", "Edge", "Application", "msedge.exe"),
-            "/usr/bin/microsoft-edge",
-            "/usr/bin/google-chrome",
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser"
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft", "Edge", "Application", "msedge.exe")
         ];
         return candidates.FirstOrDefault(candidate => !string.IsNullOrEmpty(candidate) && File.Exists(candidate));
     }
@@ -43,124 +50,76 @@ internal sealed class HeadlessBrowser : IAsyncDisposable
     public static async Task<HeadlessBrowser> StartAsync(string executable)
     {
         var profile = Directory.CreateTempSubdirectory("pvsc-tests-").FullName;
-        Process.Start(new ProcessStartInfo
+        var pipe = PipeBrowser.Launch(executable,
+            $"--headless=new --user-data-dir=\"{profile}\" --no-first-run --no-default-browser-check --disable-extensions --disable-sync --disable-background-networking --disable-gpu --lang=en-US about:blank");
+        var browser = new HeadlessBrowser(profile, pipe);
+        try
         {
-            FileName = executable,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            ArgumentList =
-            {
-                "--headless=new", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
-                $"--user-data-dir={profile}", "--no-first-run", "--no-default-browser-check",
-                "--disable-extensions", "--disable-sync", "--disable-background-networking",
-                "--disable-gpu", "--lang=en-US", "about:blank"
-            }
-        })?.Dispose();
-
-        // The process started above is a launcher that hands over to a detached
-        // browser, so the port is read from the file the browser writes instead.
-        var portFile = Path.Combine(profile, "DevToolsActivePort");
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < deadline)
-        {
-            try
-            {
-                if (File.Exists(portFile) && int.TryParse(File.ReadLines(portFile).FirstOrDefault(), out var port) && port > 0)
-                {
-                    var browser = new HeadlessBrowser(profile, port);
-                    await browser.WaitForEndpointAsync();
-                    return browser;
-                }
-            }
-            catch (IOException)
-            {
-                // Still being written.
-            }
-
-            await Task.Delay(100);
+            using var deadline = new CancellationTokenSource(StartupTimeout);
+            await pipe.Connection.SendAsync("Browser.getVersion", cancellationToken: deadline.Token);
+            return browser;
         }
-
-        throw new TimeoutException("The browser did not publish its debugging port.");
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or InvalidOperationException)
+        {
+            await browser.DisposeAsync();
+            throw new TimeoutException("The browser did not answer over its DevTools pipe.", ex);
+        }
     }
 
-    private async Task WaitForEndpointAsync()
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < deadline)
-        {
-            try
-            {
-                using var response = await http.GetAsync($"http://127.0.0.1:{Port}/json/version");
-                if (response.IsSuccessStatusCode) return;
-            }
-            catch (HttpRequestException)
-            {
-            }
-
-            await Task.Delay(100);
-        }
-
-        throw new TimeoutException("The browser's debugging endpoint never answered.");
-    }
-
-    /// <summary>Opens a new tab and connects to it.</summary>
+    /// <summary>Opens a new tab and attaches a test client to it.</summary>
     public async Task<TestTab> NewTabAsync(string url = "about:blank")
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"http://127.0.0.1:{Port}/json/new?{Uri.EscapeDataString(url)}");
-        using var response = await http.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var id = document.RootElement.GetProperty("id").GetString()!;
-        var webSocketUrl = document.RootElement.GetProperty("webSocketDebuggerUrl").GetString()!;
-        return new TestTab(this, id, webSocketUrl, await CdpTestClient.ConnectAsync(webSocketUrl));
+        var created = await Connection.SendAsync("Target.createTarget", new { url });
+        var targetId = created.GetProperty("targetId").GetString()!;
+        var channel = await Connection.AttachAsync(targetId);
+        return new TestTab(this, targetId, new CdpTestClient(channel));
     }
 
-    public async Task CloseTabAsync(string id)
+    /// <summary>Attaches a separate session to a tab, for handing to a session under test.</summary>
+    public Task<SessionChannel> AttachAsync(string targetId) => Connection.AttachAsync(targetId);
+
+    public async Task CloseTabAsync(string targetId)
     {
         try
         {
-            using var response = await http.GetAsync($"http://127.0.0.1:{Port}/json/close/{id}");
+            await Connection.SendAsync("Target.closeTarget", new { targetId });
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
+            // Already closed, or the browser is gone.
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        // Ask the browser to close itself; killing the launcher would orphan it.
         try
         {
-            var version = await http.GetStringAsync($"http://127.0.0.1:{Port}/json/version");
-            using var document = JsonDocument.Parse(version);
-            using var control = new ClientWebSocket();
-            control.Options.Proxy = null;
-            await control.ConnectAsync(new Uri(document.RootElement.GetProperty("webSocketDebuggerUrl").GetString()!), CancellationToken.None);
-            await control.SendAsync(Encoding.UTF8.GetBytes("{\"id\":1,\"method\":\"Browser.close\"}"), WebSocketMessageType.Text, true, CancellationToken.None);
+            using var closing = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await Connection.SendAsync("Browser.close", cancellationToken: closing.Token);
         }
-        catch (Exception ex) when (ex is HttpRequestException or WebSocketException or IOException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or OperationCanceledException)
         {
+            // The browser is already closing, or gone.
         }
 
-        for (var attempt = 0; attempt < 50 && await IsUpAsync(); attempt++) await Task.Delay(100);
-
-        if (await IsUpAsync() && OperatingSystem.IsWindows())
+        try
         {
-            using var kill = Process.Start(new ProcessStartInfo
+            using var exit = new CancellationTokenSource(ExitTimeout);
+            await Process.WaitForExitAsync(exit.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
             {
-                FileName = "powershell",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                ArgumentList =
-                {
-                    "-NoProfile", "-Command",
-                    $"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{profileDirectory}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
-                }
-            });
-            kill?.WaitForExit(10000);
+                Process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+                // Exited between the wait and the kill.
+            }
         }
 
-        http.Dispose();
+        await browser.DisposeAsync();
 
         // Windows will not delete a directory a dying browser still has open.
         for (var attempt = 0; attempt < 40; attempt++)
@@ -176,36 +135,20 @@ internal sealed class HeadlessBrowser : IAsyncDisposable
             }
         }
     }
-
-    private async Task<bool> IsUpAsync()
-    {
-        try
-        {
-            using var response = await http.GetAsync($"http://127.0.0.1:{Port}/json/version");
-            return true;
-        }
-        catch (HttpRequestException)
-        {
-            return false;
-        }
-    }
 }
 
 internal sealed class TestTab : IAsyncDisposable
 {
     private readonly HeadlessBrowser browser;
 
-    public TestTab(HeadlessBrowser browser, string id, string webSocketUrl, CdpTestClient client)
+    public TestTab(HeadlessBrowser browser, string targetId, CdpTestClient client)
     {
         this.browser = browser;
-        Id = id;
-        WebSocketUrl = webSocketUrl;
+        TargetId = targetId;
         Client = client;
     }
 
-    public string Id { get; }
-
-    public string WebSocketUrl { get; }
+    public string TargetId { get; }
 
     public CdpTestClient Client { get; }
 
@@ -218,48 +161,38 @@ internal sealed class TestTab : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await Client.DisposeAsync();
-        await browser.CloseTabAsync(Id);
+        await browser.CloseTabAsync(TargetId);
     }
 }
 
 /// <summary>A minimal DevTools client for steering a tab from a test.</summary>
 internal sealed class CdpTestClient : IAsyncDisposable
 {
-    private readonly ClientWebSocket socket = new();
+    private readonly ICdpChannel channel;
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> pending = new();
+    private readonly Task reader;
     private int nextId;
-    private Task? reader;
 
-    public static async Task<CdpTestClient> ConnectAsync(string webSocketUrl)
+    public CdpTestClient(ICdpChannel channel)
     {
-        var client = new CdpTestClient();
-        client.socket.Options.Proxy = null;
-        await client.socket.ConnectAsync(new Uri(webSocketUrl), CancellationToken.None);
-        client.reader = Task.Run(client.ReadLoopAsync);
-        return client;
+        this.channel = channel;
+        reader = Task.Run(ReadLoopAsync);
     }
 
     private async Task ReadLoopAsync()
     {
-        var buffer = new byte[65536];
         try
         {
-            while (socket.State == WebSocketState.Open)
+            while (await channel.ReceiveAsync() is { } text)
             {
-                var text = await CdpResponseReader.ReceiveTextMessageAsync(socket, buffer, CancellationToken.None);
-                if (text is null) break;
-                if (text.Length == 0) continue;
-
                 using var document = JsonDocument.Parse(text);
                 if (document.RootElement.TryGetProperty("id", out var idElement) &&
-                    pending.TryRemove(idElement.GetInt32(), out var completion))
+                    idElement.TryGetInt32(out var id) &&
+                    pending.TryRemove(id, out var completion))
                 {
                     completion.TrySetResult(document.RootElement.Clone());
                 }
             }
-        }
-        catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or ObjectDisposedException)
-        {
         }
         finally
         {
@@ -272,16 +205,25 @@ internal sealed class CdpTestClient : IAsyncDisposable
         var id = Interlocked.Increment(ref nextId);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         pending[id] = completion;
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new { id, method, @params = parameters ?? new { } });
-        await socket.SendAsync(payload, WebSocketMessageType.Text, true, CancellationToken.None);
-
-        var reply = await completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
-        if (reply.TryGetProperty("error", out var error))
+        try
         {
-            throw new InvalidOperationException($"{method} failed: {error.GetProperty("message").GetString()}");
-        }
+            // The reader may have ended before this request was registered, in
+            // which case nothing would ever answer it.
+            if (reader.IsCompleted) throw new IOException("The tab closed.");
+            await channel.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { id, method, @params = parameters ?? new { } }));
 
-        return reply.GetProperty("result");
+            var reply = await completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            if (reply.TryGetProperty("error", out var error))
+            {
+                throw new InvalidOperationException($"{method} failed: {error.GetProperty("message").GetString()}");
+            }
+
+            return reply.GetProperty("result");
+        }
+        finally
+        {
+            pending.TryRemove(id, out _);
+        }
     }
 
     /// <summary>Evaluates an expression in the page and returns its value as text.</summary>
@@ -303,21 +245,11 @@ internal sealed class CdpTestClient : IAsyncDisposable
         };
     }
 
+    /// <summary>Detaches from the tab, then waits briefly for the reader to finish.</summary>
     public async ValueTask DisposeAsync()
     {
-        try
-        {
-            if (socket.State == WebSocketState.Open)
-            {
-                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
-            }
-        }
-        catch (WebSocketException)
-        {
-        }
-
-        if (reader is not null) await Task.WhenAny(reader, Task.Delay(2000));
-        socket.Dispose();
+        if (channel is IAsyncDisposable disposable) await disposable.DisposeAsync();
+        await Task.WhenAny(reader, Task.Delay(2000));
     }
 }
 
