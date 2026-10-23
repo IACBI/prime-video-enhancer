@@ -2,7 +2,7 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
-## Unreleased
+## 3.8.1 — 2026-10-23
 
 - **Android releases are signed with a stable release key.** From this release on, an update installs over the previous version and keeps you signed in. Moving here from 3.8.0 or earlier needs one last uninstall. [SECURITY.md](SECURITY.md) lists the certificate to check the APK against.
 
