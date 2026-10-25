@@ -78,29 +78,23 @@ jobs:
           flutter analyze
           flutter test
 
-      # A tagged build should carry the stable release key. Until one is stored in
-      # the release environment, a tag still publishes, signed with the runner's
-      # throwaway debug key - an APK that cannot update the release before it, so
-      # users must uninstall first. The warning keeps that visible on every run;
-      # adding the secrets switches back to the stable key with no other change.
+      # A tagged build publishes, so it must carry the stable release key: a
+      # debug-signed APK cannot update the release before it. The script fails a
+      # tag run when any signing secret is missing, and Gradle refuses the debug
+      # fallback when require=true, so neither layer alone can let one through.
       - name: Decode release keystore
         id: keystore
         env:
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
           PVSC_RELEASE_KEYSTORE_B64: ${{ secrets.PVSC_RELEASE_KEYSTORE_B64 }}
-        run: |
-          if [ -n "$PVSC_RELEASE_KEYSTORE_B64" ]; then
-            printf '%s' "$PVSC_RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            echo "path=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
-          elif [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
-            echo "::warning::PVSC_RELEASE_KEYSTORE_B64 is not set. This release APK is debug-signed and cannot update an installed copy; users must uninstall first."
-            echo "path=" >> "$GITHUB_OUTPUT"
-          else
-            echo "No release keystore configured; this untagged build will be debug-signed and must not be published."
-            echo "path=" >> "$GITHUB_OUTPUT"
-          fi
+          PVSC_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.PVSC_RELEASE_KEYSTORE_PASSWORD }}
+          PVSC_RELEASE_KEY_ALIAS: ${{ secrets.PVSC_RELEASE_KEY_ALIAS }}
+          PVSC_RELEASE_KEY_PASSWORD: ${{ secrets.PVSC_RELEASE_KEY_PASSWORD }}
+        run: bash .github/scripts/decode-release-keystore.sh
 
       - name: Build APK
         env:
+          PVSC_REQUIRE_RELEASE_SIGNING: ${{ steps.keystore.outputs.require }}
           PVSC_RELEASE_KEYSTORE: ${{ steps.keystore.outputs.path }}
           PVSC_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.PVSC_RELEASE_KEYSTORE_PASSWORD }}
           PVSC_RELEASE_KEY_ALIAS: ${{ secrets.PVSC_RELEASE_KEY_ALIAS }}

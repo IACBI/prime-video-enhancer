@@ -57,6 +57,23 @@ android {
             }
         }
 
+    // Set by the release workflow on a tagged build: there, the debug fallback
+    // below would publish an APK with the wrong certificate, so stop instead.
+    if (System.getenv("PVSC_REQUIRE_RELEASE_SIGNING") == "true") {
+        val missing = listOf(
+            "PVSC_RELEASE_KEYSTORE_PASSWORD",
+            "PVSC_RELEASE_KEY_ALIAS",
+            "PVSC_RELEASE_KEY_PASSWORD",
+        ).filter { System.getenv(it).isNullOrBlank() } +
+            listOfNotNull("PVSC_RELEASE_KEYSTORE".takeIf { releaseKeystorePath == null })
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "PVSC_REQUIRE_RELEASE_SIGNING is set but release signing is incomplete: " +
+                    missing.joinToString()
+            )
+        }
+    }
+
     signingConfigs {
         if (releaseKeystorePath != null) {
             create("release") {
