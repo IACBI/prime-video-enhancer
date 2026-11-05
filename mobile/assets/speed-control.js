@@ -498,6 +498,14 @@
   const handledAutoSkipButtons = new WeakSet();
   const handledAdSkipButtons = new WeakSet();
 
+  // The ad indicators found by the last full check. Lets the observer ask
+  // "does this changed element hold one?" with contains(), instead of searching
+  // the element's whole subtree with AD_INDICATOR_SELECTOR - which on a player
+  // container whose class flips with every overlay show/hide cost ~17ms each
+  // time. An indicator that is new since that check arrives as an insertion,
+  // which the observer still searches, and that search refreshes this list.
+  let knownAdIndicators = [];
+
   // Guards against an unbounded rate-write fight with Amazon's own player SDK.
   // If the SDK insists on resetting the rate, re-asserting from `ratechange`
   // turns into a ping-pong at event rate — and every single toggle makes
@@ -1038,6 +1046,7 @@
     }
 
     const adIndicators = document.querySelectorAll(AD_INDICATOR_SELECTOR);
+    knownAdIndicators = Array.from(adIndicators);
     let adDetected = false;
     for (const ind of adIndicators) {
       if (isAdIndicatorActive(ind)) {
@@ -1566,7 +1575,8 @@
             // above ad UI can reveal an ad; everything else waits for the tick.
             const target = mutation.target;
             if (!sawAttribute && target instanceof Element && !root.contains(target)
-                && (target.matches(AD_INDICATOR_SELECTOR) || target.querySelector(AD_INDICATOR_SELECTOR))) {
+                && (target.matches(AD_INDICATOR_SELECTOR)
+                    || knownAdIndicators.some((indicator) => target.contains(indicator)))) {
               sawAttribute = true;
             }
             continue;
