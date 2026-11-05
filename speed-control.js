@@ -1736,6 +1736,8 @@
         --pvsc-text: #F2F2F3;
         --pvsc-dim: rgba(242, 242, 243, 0.52);
         --pvsc-live: #FFCC00;
+        --pvsc-press: #2E2E34;
+        --pvsc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
         --pvsc-radius: 4px;
         --pvsc-gap: 8px;
         --pvsc-ctl: 32px;
@@ -1807,15 +1809,18 @@
            claims the gesture for panning and fires pointercancel. */
         touch-action: none;
         transform: translate(var(--pvsc-launcher-shift), var(--pvsc-launcher-shift-y));
-        transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transition: transform 140ms var(--pvsc-ease),
                     background 160ms ease, border-color 160ms ease;
       }
       .pvsc-launcher:active { cursor: grabbing; }
-      .pvsc-launcher:hover,
       .pvsc-launcher:focus-visible {
         background: var(--pvsc-ink);
         border-color: rgba(255, 255, 255, 0.28);
         outline: none;
+      }
+      #${ROOT_ID}.pvsc-menu-open .pvsc-launcher {
+        background: var(--pvsc-ink);
+        border-color: rgba(255, 255, 255, 0.28);
       }
       .pvsc-launcher-dot {
         font-size: 11px;
@@ -1842,6 +1847,18 @@
       }
       #${ROOT_ID}.pvsc-menu-open .pvsc-panel {
         display: flex;
+        animation: pvsc-panel-in 140ms var(--pvsc-ease);
+      }
+      /* The panel toggles display, which a transition cannot follow, so a short
+         entry keyframe keeps it from popping in. Opacity and transform only, so
+         it stays on the compositor over playing video. */
+      @keyframes pvsc-panel-in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes pvsc-sheet-in {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: none; }
       }
       .pvsc-eyebrow {
         font-size: var(--pvsc-label);
@@ -1889,8 +1906,8 @@
         user-select: none;
         transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
       }
-      .pvsc-panel button:hover {
-        background: var(--pvsc-ink-3);
+      .pvsc-panel button:active {
+        background: var(--pvsc-press);
       }
       .pvsc-panel button:focus-visible,
       .pvsc-panel input:focus-visible {
@@ -1941,9 +1958,14 @@
         border-radius: 2px;
         opacity: 0;
         pointer-events: none;
-        transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-                    width 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transition: transform 140ms var(--pvsc-ease),
+                    width 140ms var(--pvsc-ease),
                     opacity 120ms ease;
+      }
+      /* Set for the frame the marker reappears in, so it lands on the current
+         stop instead of sliding in from wherever it was last left. */
+      .pvsc-rail-marker.pvsc-snap {
+        transition: none;
       }
       .pvsc-rail button {
         position: relative;
@@ -1956,9 +1978,6 @@
         background: transparent;
         border: 0;
         border-radius: 2px;
-      }
-      .pvsc-rail button:hover {
-        background: rgba(255, 255, 255, 0.07);
       }
       .pvsc-rail button.pvsc-on {
         color: var(--pvsc-ink);
@@ -1979,9 +1998,6 @@
         color: var(--pvsc-ink);
         background: var(--pvsc-live);
         border-color: var(--pvsc-live);
-      }
-      .pvsc-switch.pvsc-on:hover {
-        background: var(--pvsc-live);
       }
       .pvsc-swatches {
         display: grid;
@@ -2023,6 +2039,27 @@
       .pvsc-panel .pvsc-value-btn.pvsc-on {
         color: var(--pvsc-live);
         border-color: var(--pvsc-live);
+      }
+
+      /* Hover only where the pointer can hover. On touch a tapped button kept
+         its hover fill until the next tap elsewhere, which read as stuck. */
+      @media (hover: hover) {
+        .pvsc-launcher:hover {
+          background: var(--pvsc-ink);
+          border-color: rgba(255, 255, 255, 0.28);
+        }
+        .pvsc-panel button:hover {
+          background: var(--pvsc-ink-3);
+        }
+        .pvsc-panel .pvsc-rail button:hover {
+          background: rgba(255, 255, 255, 0.07);
+        }
+        .pvsc-panel .pvsc-rail button.pvsc-on:hover {
+          background: transparent;
+        }
+        .pvsc-panel .pvsc-switch.pvsc-on:hover {
+          background: var(--pvsc-live);
+        }
       }
 
       /* ── Actions ──────────────────────────────────────────────────────── */
@@ -2088,6 +2125,10 @@
           padding-right: max(var(--pvsc-pad), env(safe-area-inset-right, 0px));
           box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.75);
         }
+        #${ROOT_ID}.pvsc-menu-open .pvsc-panel {
+          animation-name: pvsc-sheet-in;
+          animation-duration: 180ms;
+        }
       }
 
       /* ══ Touch landscape: side sheet, two columns, no scrolling ════════ */
@@ -2123,6 +2164,7 @@
         #${ROOT_ID} *,
         #${ROOT_ID} {
           transition-duration: 0ms !important;
+          animation: none !important;
         }
       }
     `;
@@ -2438,12 +2480,19 @@
       railMarker.style.opacity = "0";
       return;
     }
+    const reappearing = railMarker.style.opacity !== "1";
+    railMarker.classList.toggle("pvsc-snap", reappearing);
     // offsetLeft and `left: 0` are both resolved against the offsetParent's
     // padding edge — the rail is position:relative, so the two share an origin
     // and the offset can be used as the translation directly.
     railMarker.style.width = `${stop.offsetWidth}px`;
     railMarker.style.transform = `translateX(${stop.offsetLeft}px)`;
     railMarker.style.opacity = "1";
+    if (reappearing) {
+      // Commit the snapped position before transitions come back on.
+      void railMarker.offsetWidth;
+      railMarker.classList.remove("pvsc-snap");
+    }
   }
 
   /**
