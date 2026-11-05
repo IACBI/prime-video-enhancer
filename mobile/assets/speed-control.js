@@ -280,7 +280,7 @@
       sleep: "Sleep",
       sleepHint: "Pause playback after a set time.",
       sleepLabel: "Sleep timer",
-      skipIntro: "⏭ Skip intro",
+      skipIntro: "\u23ED\uFE0E Skip intro",
       adsBlocked: (count, minutes, unit) => `${count} ads blocked · ${minutes}${unit} saved`,
       speedSaved: (duration) => `${duration} saved by speed`,
       units: { h: "h", m: "m", s: "s" },
@@ -315,7 +315,7 @@
       sleep: "Uyku",
       sleepHint: "Belirli bir süre sonra oynatmayı duraklat.",
       sleepLabel: "Uyku zamanlayıcısı",
-      skipIntro: "⏭ Girişi atla",
+      skipIntro: "\u23ED\uFE0E Girişi atla",
       // Kept to one line at the panel's width; "saved" is carried by the line below.
       adsBlocked: (count, minutes, unit) => `${count} reklam engellendi · ${minutes}${unit}`,
       speedSaved: (duration) => `Hızla ${duration} kazanıldı`,
@@ -1735,10 +1735,12 @@
         --pvsc-ink-3: #232328;
         --pvsc-line: rgba(255, 255, 255, 0.14);
         --pvsc-text: #F2F2F3;
-        --pvsc-dim: rgba(242, 242, 243, 0.52);
+        --pvsc-dim: rgba(242, 242, 243, 0.64);
         --pvsc-live: #FFCC00;
+        --pvsc-live-tint: rgba(255, 204, 0, 0.14);
         --pvsc-press: #2E2E34;
         --pvsc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --pvsc-switch-w: 64px;
         --pvsc-radius: 4px;
         --pvsc-gap: 8px;
         --pvsc-ctl: 32px;
@@ -1893,6 +1895,13 @@
         color: var(--pvsc-dim);
         flex-shrink: 0;
       }
+      /* Beside a switch the label may wrap rather than push the switch out of
+         a narrow column ("Otomatik atla" in the landscape side sheet). */
+      .pvsc-row-switch > .pvsc-label {
+        flex-shrink: 1;
+        min-width: 0;
+        line-height: 1.15;
+      }
 
       /* ── Shared control chrome ────────────────────────────────────────── */
       .pvsc-panel button,
@@ -1988,17 +1997,24 @@
       }
 
       /* ── Subtitles ────────────────────────────────────────────────────── */
-      .pvsc-switch {
-        min-width: 46px;
+      /* A fixed minimum keeps On/Off (and Açık/Kapalı) from changing the
+         button's width, and margin-left:auto pins every switch to the same
+         right edge whatever its label's length. Solid inversion is kept for
+         the speed rail alone: a switch that is on is tinted, so three of them
+         on at once no longer outshout the selection that matters most. */
+      .pvsc-panel .pvsc-switch {
+        min-width: var(--pvsc-switch-w);
+        margin-left: auto;
         padding: 0 10px;
+        color: var(--pvsc-dim);
         font-size: var(--pvsc-label);
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
-      .pvsc-switch.pvsc-on {
-        color: var(--pvsc-ink);
-        background: var(--pvsc-live);
+      .pvsc-panel .pvsc-switch.pvsc-on {
+        color: var(--pvsc-live);
+        background: var(--pvsc-live-tint);
         border-color: var(--pvsc-live);
       }
       .pvsc-swatches {
@@ -2012,12 +2028,14 @@
         width: 100%;
         height: var(--pvsc-swatch);
         padding: 0;
-        border: 2px solid rgba(255, 255, 255, 0.22);
+        border: 1px solid rgba(0, 0, 0, 0.35);
         border-radius: var(--pvsc-radius);
+        transition: box-shadow 120ms ease;
       }
-      .pvsc-swatch.pvsc-on {
-        border-color: var(--pvsc-text);
-        box-shadow: 0 0 0 2px var(--pvsc-live);
+      /* A gap of panel ink, then a white ring. The old yellow ring all but
+         vanished around the yellow and gold swatches, the two most chosen. */
+      .pvsc-panel .pvsc-swatch.pvsc-on {
+        box-shadow: 0 0 0 2px var(--pvsc-ink), 0 0 0 4px var(--pvsc-text);
       }
       .pvsc-size-input {
         flex: 1;
@@ -2040,6 +2058,7 @@
       }
       .pvsc-panel .pvsc-value-btn.pvsc-on {
         color: var(--pvsc-live);
+        background: var(--pvsc-live-tint);
         border-color: var(--pvsc-live);
       }
 
@@ -2059,8 +2078,15 @@
         .pvsc-panel .pvsc-rail button.pvsc-on:hover {
           background: transparent;
         }
-        .pvsc-panel .pvsc-switch.pvsc-on:hover {
-          background: var(--pvsc-live);
+        .pvsc-panel .pvsc-switch.pvsc-on:hover,
+        .pvsc-panel .pvsc-value-btn.pvsc-on:hover {
+          background: rgba(255, 204, 0, 0.22);
+        }
+        .pvsc-panel .pvsc-swatch:hover {
+          box-shadow: 0 0 0 2px var(--pvsc-ink), 0 0 0 4px rgba(255, 255, 255, 0.35);
+        }
+        .pvsc-panel .pvsc-swatch.pvsc-on:hover {
+          box-shadow: 0 0 0 2px var(--pvsc-ink), 0 0 0 4px var(--pvsc-text);
         }
       }
 
@@ -2101,6 +2127,7 @@
           --pvsc-launcher-w: 84px;
           --pvsc-launcher-h: 44px;
           --pvsc-swatch: 40px;
+          --pvsc-switch-w: 76px;
         }
         /* On touch there is no hover to bring the control back, and a tap that
            passes through to the player toggles Prime's own overlay instead. So
@@ -2738,7 +2765,7 @@
   actionsCol.className = "pvsc-col";
 
   const pitchRow = document.createElement("div");
-  pitchRow.className = "pvsc-row";
+  pitchRow.className = "pvsc-row pvsc-row-switch";
   const pitchLabel = document.createElement("span");
   pitchLabel.className = "pvsc-label";
   pitchLabel.textContent = L.pitch;
@@ -2748,7 +2775,7 @@
   pitchRow.append(pitchLabel, pitchSwitch);
 
   const autoSkipRow = document.createElement("div");
-  autoSkipRow.className = "pvsc-row";
+  autoSkipRow.className = "pvsc-row pvsc-row-switch";
   const autoSkipLabel = document.createElement("span");
   autoSkipLabel.className = "pvsc-label";
   autoSkipLabel.textContent = L.autoSkip;
