@@ -30,9 +30,9 @@ What it does not do: it does not bypass DRM, download video, collect telemetry, 
 
 ### Requirements
 
-- **Windows:** Windows 10 or later and Microsoft Edge. The `Light` download also needs the .NET 8 Runtime; the `Standalone` one does not.
+- **Windows:** Windows 10 or later and Microsoft Edge. The `Light` download also needs the .NET 10 Runtime; the `Standalone` one does not.
 - **Android:** Android 7.0 or later with an up-to-date Android System WebView.
-- **Building from source:** the .NET 8 SDK for the desktop app; Flutter 3.47.1 (the version CI builds with), the Android SDK and Java 17 for the Android app.
+- **Building from source:** the .NET 10 SDK for the desktop app; Flutter 3.47.1 (the version CI builds with), the Android SDK and Java 17 for the Android app.
 
 ### Installation
 
@@ -41,7 +41,7 @@ Download from the [latest release](https://github.com/IACBI/prime-video-enhancer
 | File | Use it for |
 | --- | --- |
 | `PrimeVideoSpeedApp-Standalone.exe` | Windows, no .NET needed |
-| `PrimeVideoSpeedApp-Light.exe` | Windows, smaller, needs the .NET 8 Runtime |
+| `PrimeVideoSpeedApp-Light.exe` | Windows, smaller, needs the .NET 10 Runtime |
 | `PrimeVideoSpeedApp-Mobile.apk` | Android |
 
 Releases after 3.7.0 also include `SHA256SUMS.txt` for checking a download, and from the release after 3.8.0 the Android app is signed with a stable release key; [SECURITY.md](SECURITY.md) shows how to verify both. Moving to that release from 3.8.0 or earlier needs one last uninstall, which signs you out.
@@ -133,9 +133,9 @@ Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, ç
 
 ### Gereksinimler
 
-- **Windows:** Windows 10 veya üzeri ve Microsoft Edge. `Light` sürümü ayrıca .NET 8 Runtime ister; `Standalone` istemez.
+- **Windows:** Windows 10 veya üzeri ve Microsoft Edge. `Light` sürümü ayrıca .NET 10 Runtime ister; `Standalone` istemez.
 - **Android:** Android 7.0 veya üzeri ve güncel bir Android System WebView.
-- **Kaynaktan derlemek için:** masaüstü uygulama için .NET 8 SDK; Android uygulaması için Flutter 3.47.1 (CI'ın kullandığı sürüm), Android SDK ve Java 17.
+- **Kaynaktan derlemek için:** masaüstü uygulama için .NET 10 SDK; Android uygulaması için Flutter 3.47.1 (CI'ın kullandığı sürüm), Android SDK ve Java 17.
 
 ### Kurulum
 
@@ -144,7 +144,7 @@ Yapmadıkları: DRM'i aşmaz, video indirmez, telemetri toplamaz; şifrenizi, ç
 | Dosya | Ne için |
 | --- | --- |
 | `PrimeVideoSpeedApp-Standalone.exe` | Windows, .NET gerekmez |
-| `PrimeVideoSpeedApp-Light.exe` | Windows, daha küçük, .NET 8 Runtime gerekir |
+| `PrimeVideoSpeedApp-Light.exe` | Windows, daha küçük, .NET 10 Runtime gerekir |
 | `PrimeVideoSpeedApp-Mobile.apk` | Android |
 
 3.7.0'dan sonraki sürümlerde indirilen dosyayı doğrulamak için `SHA256SUMS.txt` de yer alır; 3.8.0'dan sonraki sürümden itibaren Android uygulaması sabit bir sürüm anahtarıyla imzalanır. İkisinin nasıl doğrulanacağı [SECURITY.md](SECURITY.md) dosyasında. 3.8.0 veya daha eski bir sürümden bu sürüme geçerken uygulamayı son bir kez kaldırmanız gerekir; bu da oturumu kapatır.

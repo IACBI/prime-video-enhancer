@@ -3,7 +3,7 @@
 ## Start here
 
 1. Install the latest asset from the [GitHub Releases page](https://github.com/IACBI/prime-video-enhancer/releases/latest).
-2. On Windows, choose **Standalone** if you do not have the .NET 8 Desktop Runtime; otherwise the smaller **Light** package is suitable.
+2. On Windows, choose **Standalone** if you do not have the .NET 10 Runtime; otherwise the smaller **Light** package is suitable.
 3. Confirm that Microsoft Edge is installed and up to date.
 4. Start a supported Prime Video title and wait for the floating control to appear.
 

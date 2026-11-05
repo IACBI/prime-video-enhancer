@@ -42,6 +42,13 @@ Include:
   The certificate's SHA-256 digest must be `6a79e8fd40a3dec29b2111ac3f354b47583179b45fc3dc376252b1b8d758f364`.
 
   Releases `v3.6.6` through `v3.8.0` were signed with throwaway debug keys and cannot be verified this way; installing a later, properly signed release over one of them requires uninstalling it first, which clears the app's stored session.
+- Releases after `v3.8.1` also carry a signed build provenance attestation for each Windows executable and the APK. It shows which workflow run, commit and repository produced the file, so a binary replaced on the release page later fails the check. With the GitHub CLI:
+
+  ```
+  gh attestation verify PrimeVideoSpeedApp-Standalone.exe --repo IACBI/prime-video-enhancer
+  ```
+
+  The Windows executables are not Authenticode-signed, so Windows SmartScreen may still warn before running them.
 - The release signing key is held in a protected GitHub Environment named `release`. The Android release job runs in that environment, so its signing secrets are released only to a run a maintainer has approved. `main` cannot be force-pushed or deleted, and only repository administrators can create, move or delete `v*` tags.
 
 ### Privacy boundaries

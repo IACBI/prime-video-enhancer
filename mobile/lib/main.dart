@@ -262,8 +262,8 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                       // to Amazon and Prime Video: the origin is checked too, so a
                       // frame from anywhere else cannot ask for the device's DRM id.
                       onPermissionRequest: (controller, request) async {
-                        final granted = isFirstPartyHost(
-                                request.origin.host.toLowerCase())
+                        final granted = mayUseProtectedMedia(
+                                request.origin.uriValue)
                             ? request.resources
                                 .where((resource) =>
                                     resource ==
@@ -369,6 +369,20 @@ class _PrimeVideoWebScreenState extends State<PrimeVideoWebScreen> {
                         final url = action.request.url;
                         if (url == null || isAllowedNavigation(url.uriValue)) {
                           return NavigationActionPolicy.ALLOW;
+                        }
+                        final upgraded = httpsUpgradeOf(url.uriValue);
+                        if (upgraded != null) {
+                          // Only the page itself is reloaded over https; a
+                          // plain-http frame inside one is simply refused.
+                          // Loaded once this navigation has been cancelled,
+                          // not from inside the decision about it.
+                          if (action.isForMainFrame) {
+                            Future(() => controller.loadUrl(
+                                  urlRequest:
+                                      URLRequest(url: WebUri.uri(upgraded)),
+                                ));
+                          }
+                          return NavigationActionPolicy.CANCEL;
                         }
                         debugPrint('[PVSC-Mobile] Blocked navigation to $url');
                         if (mounted) {

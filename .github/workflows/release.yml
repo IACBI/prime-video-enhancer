@@ -20,10 +20,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup .NET 8
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Run desktop tests
         run: dotnet run --project PrimeVideoSpeedApp.Tests/PrimeVideoSpeedApp.Tests.csproj -c Release
@@ -121,6 +121,10 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      # For the build provenance attestation below: a short-lived OIDC token to
+      # sign it with, and the right to store it against this repository.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -172,6 +176,14 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      # A checksum only says a download matches the release page. The signed
+      # provenance also says which workflow run, commit and repository built it,
+      # so a binary swapped on the release page afterwards fails verification.
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: 'dist/PrimeVideoSpeedApp-*'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3

@@ -7,6 +7,10 @@ All notable user-facing changes are documented here. Version tags and GitHub Rel
 - **A calmer, more consistent panel.** Switches that are on are now tinted rather than solid yellow, line up in one column, and keep the same width whether they read On or Off, so the selected speed stands out as the panel's main choice. The selected subtitle colour has a white ring that stays visible on the yellow and gold swatches, and secondary labels are easier to read.
 - The panel fades in instead of popping open, the speed marker no longer slides in from the left edge every time the panel opens, and tapped buttons on a phone no longer stay highlighted. With reduced motion turned on in the system, the panel does not animate at all.
 - Screen readers now hear whether the panel is open and which switches, speeds and colours are selected, and the launcher shows a clear focus ring when reached with the keyboard.
+- **Desktop: now built on .NET 10.** .NET 8 stops receiving security fixes on 10 November 2026. The `Light` download now needs the .NET 10 Runtime; `Standalone` still needs nothing.
+- **Android: Amazon and Prime Video pages only load over `https`.** A plain-`http` address is reloaded over `https` instead of being shown, and only an `https` page can receive the protected-media (DRM) permission. With no address bar, an `http` page rewritten by someone on the same network would otherwise have looked exactly like the real sign-in page.
+- **Lighter during playback.** The panel no longer searches the player's whole element tree each time Prime shows or hides its overlay; in a test player that search alone took 8–17 ms on the main thread every time. On desktop, the window icon and taskbar identity are no longer rewritten every two seconds, and a stuck PowerShell lookup can no longer stall ad blocking.
+- Releases now include signed build provenance for every download; [SECURITY.md](SECURITY.md) shows how to check it with `gh attestation verify`.
 
 ## 3.8.1 — 2026-10-23
 

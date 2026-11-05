@@ -176,13 +176,34 @@ bool isFirstPartyHost(String host) =>
 /// indistinguishable from Prime Video - and would receive the controller and be
 /// eligible for the DRM permission. Only Amazon and Prime Video pages qualify,
 /// plus `about:blank`; every other scheme (`intent:`, `market:`, `tel:`, ...) is
-/// refused. Plain `http` is allowed for those hosts because a redirect may pass
-/// through it on the way to `https`.
+/// refused, and so is plain `http`: see [httpsUpgradeOf] for what to load
+/// instead.
 bool isAllowedNavigation(Uri uri) {
   if (uri.scheme == 'about') return uri.toString() == 'about:blank';
-  if (uri.scheme != 'https' && uri.scheme != 'http') return false;
+  if (uri.scheme != 'https') return false;
   return isFirstPartyHost(uri.host.toLowerCase());
 }
+
+/// The `https` address to load in place of a plain-`http` Amazon or Prime
+/// Video page, or null when [uri] is not one.
+///
+/// Plain `http` used to be allowed because a redirect may pass through it. But
+/// with no address bar, a page served over `http` - which anyone on the same
+/// network can rewrite - looked exactly like the real one, sign-in form and
+/// all. Upgrading keeps those redirects working without ever showing one.
+Uri? httpsUpgradeOf(Uri uri) {
+  if (uri.scheme != 'http' || !isFirstPartyHost(uri.host.toLowerCase())) {
+    return null;
+  }
+  // An explicit :80 belongs to the http address; https gets its default port.
+  return uri.replace(scheme: 'https', port: uri.port == 80 ? 443 : uri.port);
+}
+
+/// Whether a page from [origin] may be granted the protected-media (DRM)
+/// permission: Amazon or Prime Video, and only over `https`, so a page injected
+/// into a plain-`http` response cannot ask for the device's DRM id.
+bool mayUseProtectedMedia(Uri origin) =>
+    origin.scheme == 'https' && isFirstPartyHost(origin.host.toLowerCase());
 
 /// The notice shown when a link is refused, in the device's language (Turkish or
 /// English, like the controller's panel). [target] is the host, or the scheme for

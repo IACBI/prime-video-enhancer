@@ -16,6 +16,7 @@ internal static class AppIconHelper
     const uint IMAGE_ICON = 1;
     const uint LR_LOADFROMFILE = 0x00000010;
     const uint LR_DEFAULTSIZE = 0x00000040;
+    const uint WM_GETICON = 0x007F;
     const uint WM_SETICON = 0x0080;
     const nint ICON_SMALL = 0;
     const nint ICON_BIG = 1;
@@ -285,6 +286,19 @@ internal static class AppIconHelper
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, bool> DedicatedPidCache = new();
 
+    private static readonly TimeSpan PowerShellTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How often a window's shell properties are written again. Committing them
+    /// makes the shell re-read the window's taskbar identity, so doing it on
+    /// every 2-second poll was steady background work for nothing; doing it now
+    /// and then still repairs a window whose identity the browser reset.
+    /// </summary>
+    private static readonly TimeSpan ShellPropertiesRefresh = TimeSpan.FromSeconds(30);
+
+    /// <summary>When each of our windows last had its shell properties written.</summary>
+    private static Dictionary<nint, DateTime> shellPropertiesWrittenAt = new();
+
     private static bool IsOurDedicatedEdgeProcess(uint windowPid, string titleStr)
     {
         if (EdgeProcess != null && !EdgeProcess.HasExited && windowPid == EdgeProcess.Id)
@@ -325,8 +339,18 @@ internal static class AppIconHelper
                 using var cmdProc = Process.Start(psi);
                 if (cmdProc != null)
                 {
-                    var cmdLine = cmdProc.StandardOutput.ReadToEnd();
-                    cmdProc.WaitForExit(1000);
+                    // Bounded: this runs on the helper's poll loop, and an
+                    // unbounded ReadToEnd on a stuck PowerShell (a hung WMI
+                    // service is enough) stopped injection and ad blocking with it.
+                    var output = cmdProc.StandardOutput.ReadToEndAsync();
+                    if (!output.Wait(PowerShellTimeout))
+                    {
+                        try { cmdProc.Kill(); } catch { }
+                        // Not cached: the next poll tries this window again.
+                        return false;
+                    }
+
+                    var cmdLine = output.Result;
                     if (cmdLine.Contains("--remote-debugging-pipe", StringComparison.Ordinal) || cmdLine.Contains("PrimeVideoSpeedController"))
                     {
                         verified = true;
@@ -364,6 +388,11 @@ internal static class AppIconHelper
         var pkeyCmd = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 2);
         var pkeyDisplayName = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 4);
 
+        var now = DateTime.UtcNow;
+        // Rebuilt every pass, so a closed window's handle is dropped rather than
+        // kept, and possibly matched by a new window that reuses it.
+        var writtenAt = new Dictionary<nint, DateTime>();
+
         EnumWindows((hWnd, lParam) =>
         {
             var className = new StringBuilder(256);
@@ -378,9 +407,24 @@ internal static class AppIconHelper
                 {
                     // Bounded: a plain SendMessage to a hung Edge UI thread would
                     // freeze the poll loop, and with it injection and ad blocking.
-                    SendMessageTimeout(hWnd, WM_SETICON, ICON_SMALL, appIconHandle, SMTO_ABORTIFHUNG, 500, out _);
-                    SendMessageTimeout(hWnd, WM_SETICON, ICON_BIG, appIconHandle, SMTO_ABORTIFHUNG, 500, out _);
+                    // Only sent when the browser has put its own icon back, which
+                    // it does when the page's favicon changes.
+                    foreach (var size in new[] { ICON_SMALL, ICON_BIG })
+                    {
+                        SendMessageTimeout(hWnd, WM_GETICON, size, 0, SMTO_ABORTIFHUNG, 500, out var current);
+                        if (current != appIconHandle)
+                        {
+                            SendMessageTimeout(hWnd, WM_SETICON, size, appIconHandle, SMTO_ABORTIFHUNG, 500, out _);
+                        }
+                    }
 
+                    if (shellPropertiesWrittenAt.TryGetValue(hWnd, out var lastWritten) && now - lastWritten < ShellPropertiesRefresh)
+                    {
+                        writtenAt[hWnd] = lastWritten;
+                        return true;
+                    }
+
+                    writtenAt[hWnd] = now;
                     try
                     {
                         if (SHGetPropertyStoreForWindow(hWnd, ref storeGuid, out var propStore) == 0 && propStore != null)
@@ -427,5 +471,7 @@ internal static class AppIconHelper
             }
             return true;
         }, nint.Zero);
+
+        shellPropertiesWrittenAt = writtenAt;
     }
 }
