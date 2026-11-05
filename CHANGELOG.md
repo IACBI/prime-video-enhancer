@@ -2,6 +2,12 @@
 
 All notable user-facing changes are documented here. Version tags and GitHub Releases are the authoritative distribution history.
 
+## Unreleased
+
+- **A calmer, more consistent panel.** Switches that are on are now tinted rather than solid yellow, line up in one column, and keep the same width whether they read On or Off, so the selected speed stands out as the panel's main choice. The selected subtitle colour has a white ring that stays visible on the yellow and gold swatches, and secondary labels are easier to read.
+- The panel fades in instead of popping open, the speed marker no longer slides in from the left edge every time the panel opens, and tapped buttons on a phone no longer stay highlighted. With reduced motion turned on in the system, the panel does not animate at all.
+- Screen readers now hear whether the panel is open and which switches, speeds and colours are selected, and the launcher shows a clear focus ring when reached with the keyboard.
+
 ## 3.8.1 — 2026-10-23
 
 - **Android releases are signed with a stable release key.** From this release on, an update installs over the previous version and keeps you signed in. Moving here from 3.8.0 or earlier needs one last uninstall. [SECURITY.md](SECURITY.md) lists the certificate to check the APK against.
