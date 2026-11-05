@@ -34,6 +34,7 @@
 
   const ROOT_ID = "pvsc-root";
   const STYLE_ID = "pvsc-style";
+  const PANEL_ID = "pvsc-panel";
   const SUBTITLE_STYLE_ID = "pvsc-subtitle-style";
   const AD_SHIELD_STYLE_ID = "pvsc-ad-shield-style";
   const AD_COVER_ID = "pvsc-ad-freeze-canvas";
@@ -1813,10 +1814,11 @@
                     background 160ms ease, border-color 160ms ease;
       }
       .pvsc-launcher:active { cursor: grabbing; }
+      /* Focus used to be shown only as a slightly darker fill, which is not
+         visible against a dark scene. Same ring as every control in the panel. */
       .pvsc-launcher:focus-visible {
-        background: var(--pvsc-ink);
-        border-color: rgba(255, 255, 255, 0.28);
-        outline: none;
+        outline: 2px solid var(--pvsc-live);
+        outline-offset: 2px;
       }
       #${ROOT_ID}.pvsc-menu-open .pvsc-launcher {
         background: var(--pvsc-ink);
@@ -2427,18 +2429,23 @@
 
     for (const stop of stopButtons) {
       const value = Number(stop.getAttribute("data-speed"));
-      stop.classList.toggle("pvsc-on", Math.abs(value - speed) < 0.001);
+      const on = Math.abs(value - speed) < 0.001;
+      stop.classList.toggle("pvsc-on", on);
+      stop.setAttribute("aria-pressed", String(on));
     }
     updateRailMarker();
 
     subtitleSwitch.textContent = subtitleEnabled ? L.on : L.off;
     subtitleSwitch.classList.toggle("pvsc-on", subtitleEnabled);
+    subtitleSwitch.setAttribute("aria-pressed", String(subtitleEnabled));
 
     pitchSwitch.textContent = preservePitch ? L.on : L.off;
     pitchSwitch.classList.toggle("pvsc-on", preservePitch);
+    pitchSwitch.setAttribute("aria-pressed", String(preservePitch));
 
     autoSkipSwitch.textContent = autoSkipEnabled ? L.on : L.off;
     autoSkipSwitch.classList.toggle("pvsc-on", autoSkipEnabled);
+    autoSkipSwitch.setAttribute("aria-pressed", String(autoSkipEnabled));
 
     sleepButton.textContent = sleepLabel();
     sleepButton.classList.toggle("pvsc-on", sleepDeadline > 0);
@@ -2459,7 +2466,9 @@
 
     for (const swatch of swatchButtons) {
       const colorVal = swatch.getAttribute("data-color");
-      swatch.classList.toggle("pvsc-on", subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase());
+      const on = subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase();
+      swatch.classList.toggle("pvsc-on", on);
+      swatch.setAttribute("aria-pressed", String(on));
     }
 
     updateStatsDisplay();
@@ -2566,6 +2575,7 @@
   function setMenuOpen(open) {
     isMenuOpen = open;
     root.classList.toggle("pvsc-menu-open", open);
+    launcher.setAttribute("aria-expanded", String(open));
 
     if (open) {
       root.classList.remove("pvsc-hidden");
@@ -2599,7 +2609,8 @@
   launcher.type = "button";
   launcher.className = "pvsc-launcher";
   launcher.title = L.launcherTitle;
-  launcher.setAttribute("aria-haspopup", "true");
+  launcher.setAttribute("aria-expanded", "false");
+  launcher.setAttribute("aria-controls", PANEL_ID);
   const launcherValue = document.createElement("span");
   const launcherDot = document.createElement("span");
   launcherDot.className = "pvsc-launcher-dot";
@@ -2607,7 +2618,9 @@
 
   const panel = document.createElement("div");
   panel.className = "pvsc-panel";
+  panel.id = PANEL_ID;
   panel.setAttribute("role", "group");
+  panel.setAttribute("aria-label", L.panelLabel);
 
   // ── Speed band ─────────────────────────────────────────────────────────────
   const speedHead = document.createElement("div");
