@@ -34,6 +34,7 @@
 
   const ROOT_ID = "pvsc-root";
   const STYLE_ID = "pvsc-style";
+  const PANEL_ID = "pvsc-panel";
   const SUBTITLE_STYLE_ID = "pvsc-subtitle-style";
   const AD_SHIELD_STYLE_ID = "pvsc-ad-shield-style";
   const AD_COVER_ID = "pvsc-ad-freeze-canvas";
@@ -279,7 +280,7 @@
       sleep: "Sleep",
       sleepHint: "Pause playback after a set time.",
       sleepLabel: "Sleep timer",
-      skipIntro: "⏭ Skip intro",
+      skipIntro: "\u23ED\uFE0E Skip intro",
       adsBlocked: (count, minutes, unit) => `${count} ads blocked · ${minutes}${unit} saved`,
       speedSaved: (duration) => `${duration} saved by speed`,
       units: { h: "h", m: "m", s: "s" },
@@ -314,7 +315,7 @@
       sleep: "Uyku",
       sleepHint: "Belirli bir süre sonra oynatmayı duraklat.",
       sleepLabel: "Uyku zamanlayıcısı",
-      skipIntro: "⏭ Girişi atla",
+      skipIntro: "\u23ED\uFE0E Girişi atla",
       // Kept to one line at the panel's width; "saved" is carried by the line below.
       adsBlocked: (count, minutes, unit) => `${count} reklam engellendi · ${minutes}${unit}`,
       speedSaved: (duration) => `Hızla ${duration} kazanıldı`,
@@ -1734,8 +1735,12 @@
         --pvsc-ink-3: #232328;
         --pvsc-line: rgba(255, 255, 255, 0.14);
         --pvsc-text: #F2F2F3;
-        --pvsc-dim: rgba(242, 242, 243, 0.52);
+        --pvsc-dim: rgba(242, 242, 243, 0.64);
         --pvsc-live: #FFCC00;
+        --pvsc-live-tint: rgba(255, 204, 0, 0.14);
+        --pvsc-press: #2E2E34;
+        --pvsc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --pvsc-switch-w: 64px;
         --pvsc-radius: 4px;
         --pvsc-gap: 8px;
         --pvsc-ctl: 32px;
@@ -1807,15 +1812,19 @@
            claims the gesture for panning and fires pointercancel. */
         touch-action: none;
         transform: translate(var(--pvsc-launcher-shift), var(--pvsc-launcher-shift-y));
-        transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transition: transform 140ms var(--pvsc-ease),
                     background 160ms ease, border-color 160ms ease;
       }
       .pvsc-launcher:active { cursor: grabbing; }
-      .pvsc-launcher:hover,
+      /* Focus used to be shown only as a slightly darker fill, which is not
+         visible against a dark scene. Same ring as every control in the panel. */
       .pvsc-launcher:focus-visible {
+        outline: 2px solid var(--pvsc-live);
+        outline-offset: 2px;
+      }
+      #${ROOT_ID}.pvsc-menu-open .pvsc-launcher {
         background: var(--pvsc-ink);
         border-color: rgba(255, 255, 255, 0.28);
-        outline: none;
       }
       .pvsc-launcher-dot {
         font-size: 11px;
@@ -1842,6 +1851,18 @@
       }
       #${ROOT_ID}.pvsc-menu-open .pvsc-panel {
         display: flex;
+        animation: pvsc-panel-in 140ms var(--pvsc-ease);
+      }
+      /* The panel toggles display, which a transition cannot follow, so a short
+         entry keyframe keeps it from popping in. Opacity and transform only, so
+         it stays on the compositor over playing video. */
+      @keyframes pvsc-panel-in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes pvsc-sheet-in {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: none; }
       }
       .pvsc-eyebrow {
         font-size: var(--pvsc-label);
@@ -1874,6 +1895,13 @@
         color: var(--pvsc-dim);
         flex-shrink: 0;
       }
+      /* Beside a switch the label may wrap rather than push the switch out of
+         a narrow column ("Otomatik atla" in the landscape side sheet). */
+      .pvsc-row-switch > .pvsc-label {
+        flex-shrink: 1;
+        min-width: 0;
+        line-height: 1.15;
+      }
 
       /* ── Shared control chrome ────────────────────────────────────────── */
       .pvsc-panel button,
@@ -1889,8 +1917,8 @@
         user-select: none;
         transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
       }
-      .pvsc-panel button:hover {
-        background: var(--pvsc-ink-3);
+      .pvsc-panel button:active {
+        background: var(--pvsc-press);
       }
       .pvsc-panel button:focus-visible,
       .pvsc-panel input:focus-visible {
@@ -1941,9 +1969,14 @@
         border-radius: 2px;
         opacity: 0;
         pointer-events: none;
-        transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-                    width 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transition: transform 140ms var(--pvsc-ease),
+                    width 140ms var(--pvsc-ease),
                     opacity 120ms ease;
+      }
+      /* Set for the frame the marker reappears in, so it lands on the current
+         stop instead of sliding in from wherever it was last left. */
+      .pvsc-rail-marker.pvsc-snap {
+        transition: none;
       }
       .pvsc-rail button {
         position: relative;
@@ -1957,9 +1990,6 @@
         border: 0;
         border-radius: 2px;
       }
-      .pvsc-rail button:hover {
-        background: rgba(255, 255, 255, 0.07);
-      }
       .pvsc-rail button.pvsc-on {
         color: var(--pvsc-ink);
         font-weight: 700;
@@ -1967,21 +1997,25 @@
       }
 
       /* ── Subtitles ────────────────────────────────────────────────────── */
-      .pvsc-switch {
-        min-width: 46px;
+      /* A fixed minimum keeps On/Off (and Açık/Kapalı) from changing the
+         button's width, and margin-left:auto pins every switch to the same
+         right edge whatever its label's length. Solid inversion is kept for
+         the speed rail alone: a switch that is on is tinted, so three of them
+         on at once no longer outshout the selection that matters most. */
+      .pvsc-panel .pvsc-switch {
+        min-width: var(--pvsc-switch-w);
+        margin-left: auto;
         padding: 0 10px;
+        color: var(--pvsc-dim);
         font-size: var(--pvsc-label);
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
-      .pvsc-switch.pvsc-on {
-        color: var(--pvsc-ink);
-        background: var(--pvsc-live);
+      .pvsc-panel .pvsc-switch.pvsc-on {
+        color: var(--pvsc-live);
+        background: var(--pvsc-live-tint);
         border-color: var(--pvsc-live);
-      }
-      .pvsc-switch.pvsc-on:hover {
-        background: var(--pvsc-live);
       }
       .pvsc-swatches {
         display: grid;
@@ -1994,12 +2028,14 @@
         width: 100%;
         height: var(--pvsc-swatch);
         padding: 0;
-        border: 2px solid rgba(255, 255, 255, 0.22);
+        border: 1px solid rgba(0, 0, 0, 0.35);
         border-radius: var(--pvsc-radius);
+        transition: box-shadow 120ms ease;
       }
-      .pvsc-swatch.pvsc-on {
-        border-color: var(--pvsc-text);
-        box-shadow: 0 0 0 2px var(--pvsc-live);
+      /* A gap of panel ink, then a white ring. The old yellow ring all but
+         vanished around the yellow and gold swatches, the two most chosen. */
+      .pvsc-panel .pvsc-swatch.pvsc-on {
+        box-shadow: 0 0 0 2px var(--pvsc-ink), 0 0 0 4px var(--pvsc-text);
       }
       .pvsc-size-input {
         flex: 1;
@@ -2022,7 +2058,36 @@
       }
       .pvsc-panel .pvsc-value-btn.pvsc-on {
         color: var(--pvsc-live);
+        background: var(--pvsc-live-tint);
         border-color: var(--pvsc-live);
+      }
+
+      /* Hover only where the pointer can hover. On touch a tapped button kept
+         its hover fill until the next tap elsewhere, which read as stuck. */
+      @media (hover: hover) {
+        .pvsc-launcher:hover {
+          background: var(--pvsc-ink);
+          border-color: rgba(255, 255, 255, 0.28);
+        }
+        .pvsc-panel button:hover {
+          background: var(--pvsc-ink-3);
+        }
+        .pvsc-panel .pvsc-rail button:hover {
+          background: rgba(255, 255, 255, 0.07);
+        }
+        .pvsc-panel .pvsc-rail button.pvsc-on:hover {
+          background: transparent;
+        }
+        .pvsc-panel .pvsc-switch.pvsc-on:hover,
+        .pvsc-panel .pvsc-value-btn.pvsc-on:hover {
+          background: rgba(255, 204, 0, 0.22);
+        }
+        .pvsc-panel .pvsc-swatch:hover {
+          box-shadow: 0 0 0 2px var(--pvsc-ink), 0 0 0 4px rgba(255, 255, 255, 0.35);
+        }
+        .pvsc-panel .pvsc-swatch.pvsc-on:hover {
+          box-shadow: 0 0 0 2px var(--pvsc-ink), 0 0 0 4px var(--pvsc-text);
+        }
       }
 
       /* ── Actions ──────────────────────────────────────────────────────── */
@@ -2062,6 +2127,7 @@
           --pvsc-launcher-w: 84px;
           --pvsc-launcher-h: 44px;
           --pvsc-swatch: 40px;
+          --pvsc-switch-w: 76px;
         }
         /* On touch there is no hover to bring the control back, and a tap that
            passes through to the player toggles Prime's own overlay instead. So
@@ -2087,6 +2153,10 @@
           padding-left: max(var(--pvsc-pad), env(safe-area-inset-left, 0px));
           padding-right: max(var(--pvsc-pad), env(safe-area-inset-right, 0px));
           box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.75);
+        }
+        #${ROOT_ID}.pvsc-menu-open .pvsc-panel {
+          animation-name: pvsc-sheet-in;
+          animation-duration: 180ms;
         }
       }
 
@@ -2123,6 +2193,7 @@
         #${ROOT_ID} *,
         #${ROOT_ID} {
           transition-duration: 0ms !important;
+          animation: none !important;
         }
       }
     `;
@@ -2385,18 +2456,23 @@
 
     for (const stop of stopButtons) {
       const value = Number(stop.getAttribute("data-speed"));
-      stop.classList.toggle("pvsc-on", Math.abs(value - speed) < 0.001);
+      const on = Math.abs(value - speed) < 0.001;
+      stop.classList.toggle("pvsc-on", on);
+      stop.setAttribute("aria-pressed", String(on));
     }
     updateRailMarker();
 
     subtitleSwitch.textContent = subtitleEnabled ? L.on : L.off;
     subtitleSwitch.classList.toggle("pvsc-on", subtitleEnabled);
+    subtitleSwitch.setAttribute("aria-pressed", String(subtitleEnabled));
 
     pitchSwitch.textContent = preservePitch ? L.on : L.off;
     pitchSwitch.classList.toggle("pvsc-on", preservePitch);
+    pitchSwitch.setAttribute("aria-pressed", String(preservePitch));
 
     autoSkipSwitch.textContent = autoSkipEnabled ? L.on : L.off;
     autoSkipSwitch.classList.toggle("pvsc-on", autoSkipEnabled);
+    autoSkipSwitch.setAttribute("aria-pressed", String(autoSkipEnabled));
 
     sleepButton.textContent = sleepLabel();
     sleepButton.classList.toggle("pvsc-on", sleepDeadline > 0);
@@ -2417,7 +2493,9 @@
 
     for (const swatch of swatchButtons) {
       const colorVal = swatch.getAttribute("data-color");
-      swatch.classList.toggle("pvsc-on", subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase());
+      const on = subtitleEnabled && colorVal.toLowerCase() === subtitleColor.toLowerCase();
+      swatch.classList.toggle("pvsc-on", on);
+      swatch.setAttribute("aria-pressed", String(on));
     }
 
     updateStatsDisplay();
@@ -2438,12 +2516,19 @@
       railMarker.style.opacity = "0";
       return;
     }
+    const reappearing = railMarker.style.opacity !== "1";
+    railMarker.classList.toggle("pvsc-snap", reappearing);
     // offsetLeft and `left: 0` are both resolved against the offsetParent's
     // padding edge — the rail is position:relative, so the two share an origin
     // and the offset can be used as the translation directly.
     railMarker.style.width = `${stop.offsetWidth}px`;
     railMarker.style.transform = `translateX(${stop.offsetLeft}px)`;
     railMarker.style.opacity = "1";
+    if (reappearing) {
+      // Commit the snapped position before transitions come back on.
+      void railMarker.offsetWidth;
+      railMarker.classList.remove("pvsc-snap");
+    }
   }
 
   /**
@@ -2517,6 +2602,7 @@
   function setMenuOpen(open) {
     isMenuOpen = open;
     root.classList.toggle("pvsc-menu-open", open);
+    launcher.setAttribute("aria-expanded", String(open));
 
     if (open) {
       root.classList.remove("pvsc-hidden");
@@ -2550,7 +2636,8 @@
   launcher.type = "button";
   launcher.className = "pvsc-launcher";
   launcher.title = L.launcherTitle;
-  launcher.setAttribute("aria-haspopup", "true");
+  launcher.setAttribute("aria-expanded", "false");
+  launcher.setAttribute("aria-controls", PANEL_ID);
   const launcherValue = document.createElement("span");
   const launcherDot = document.createElement("span");
   launcherDot.className = "pvsc-launcher-dot";
@@ -2558,7 +2645,9 @@
 
   const panel = document.createElement("div");
   panel.className = "pvsc-panel";
+  panel.id = PANEL_ID;
   panel.setAttribute("role", "group");
+  panel.setAttribute("aria-label", L.panelLabel);
 
   // ── Speed band ─────────────────────────────────────────────────────────────
   const speedHead = document.createElement("div");
@@ -2676,7 +2765,7 @@
   actionsCol.className = "pvsc-col";
 
   const pitchRow = document.createElement("div");
-  pitchRow.className = "pvsc-row";
+  pitchRow.className = "pvsc-row pvsc-row-switch";
   const pitchLabel = document.createElement("span");
   pitchLabel.className = "pvsc-label";
   pitchLabel.textContent = L.pitch;
@@ -2686,7 +2775,7 @@
   pitchRow.append(pitchLabel, pitchSwitch);
 
   const autoSkipRow = document.createElement("div");
-  autoSkipRow.className = "pvsc-row";
+  autoSkipRow.className = "pvsc-row pvsc-row-switch";
   const autoSkipLabel = document.createElement("span");
   autoSkipLabel.className = "pvsc-label";
   autoSkipLabel.textContent = L.autoSkip;
