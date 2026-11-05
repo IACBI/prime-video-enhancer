@@ -14,14 +14,14 @@ if %errorlevel% neq 0 (
 echo --^> Light build completed successfully: publish\Light\PrimeVideoSpeedApp.exe (~0.3 MB)
 echo.
 
-echo [2/2] Building Standalone Single-File EXE (Self-Contained, ~64 MB)...
+echo [2/2] Building Standalone Single-File EXE (Self-Contained, ~74 MB)...
 dotnet publish PrimeVideoSpeedApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish\Standalone
 if %errorlevel% neq 0 (
     echo [ERROR] Standalone build failed.
     pause
     exit /b %errorlevel%
 )
-echo --^> Standalone build completed successfully: publish\Standalone\PrimeVideoSpeedApp.exe (~64 MB)
+echo --^> Standalone build completed successfully: publish\Standalone\PrimeVideoSpeedApp.exe (~74 MB)
 echo.
 
 echo ===============================================================================
