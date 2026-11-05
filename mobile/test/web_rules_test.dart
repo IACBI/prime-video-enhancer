@@ -54,7 +54,6 @@ void main() {
       expect(allowed('https://www.amazon.co.za/'), isTrue);
       expect(allowed('https://www.amazon.sa/'), isTrue);
       expect(allowed('https://na.account.amazon.com/ap/mfa'), isTrue);
-      expect(allowed('http://www.amazon.com/'), isTrue);
       expect(allowed('about:blank'), isTrue);
     });
 
@@ -71,6 +70,8 @@ void main() {
       expect(allowed('https://www.amazon-adsystem.com/'), isFalse);
       expect(allowed('https://evil.example/?next=https://www.primevideo.com/'), isFalse);
       expect(allowed('http://evil.example/'), isFalse);
+      expect(allowed('http://www.amazon.com/'), isFalse);
+      expect(allowed('http://www.primevideo.com/'), isFalse);
       expect(allowed('intent://scan/#Intent;scheme=zxing;end'), isFalse);
       expect(allowed('market://details?id=com.example'), isFalse);
       expect(allowed('tel:+1234567'), isFalse);
@@ -95,6 +96,34 @@ void main() {
     expect(isFirstPartyHost('m.media-amazon.com'), isFalse);
     expect(isFirstPartyHost('primevideo.com.example'), isFalse);
     expect(isFirstPartyHost(''), isFalse);
+  });
+
+  test('mayUseProtectedMedia needs Amazon or Prime Video over https', () {
+    bool may(String origin) => mayUseProtectedMedia(Uri.parse(origin));
+    expect(may('https://www.primevideo.com'), isTrue);
+    expect(may('https://www.amazon.de'), isTrue);
+    expect(may('http://www.primevideo.com'), isFalse);
+    expect(may('http://www.amazon.com'), isFalse);
+    expect(may('https://example.com'), isFalse);
+  });
+
+  group('httpsUpgradeOf', () {
+    String? upgrade(String url) => httpsUpgradeOf(Uri.parse(url))?.toString();
+
+    test('moves plain-http Amazon and Prime Video pages to https', () {
+      expect(upgrade('http://www.amazon.com/ap/signin?x=1#top'),
+          'https://www.amazon.com/ap/signin?x=1#top');
+      expect(upgrade('http://www.primevideo.com:80/detail/x'),
+          'https://www.primevideo.com/detail/x');
+      expect(upgrade('http://WWW.AMAZON.DE/'), 'https://www.amazon.de/');
+    });
+
+    test('leaves everything else alone', () {
+      expect(upgrade('https://www.amazon.com/'), isNull);
+      expect(upgrade('http://evil.example/'), isNull);
+      expect(upgrade('http://amazon.com.evil.example/'), isNull);
+      expect(upgrade('intent://scan/#Intent;end'), isNull);
+    });
   });
 
   test('browserUserAgent strips only the WebView markers', () {
